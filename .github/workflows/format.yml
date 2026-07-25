@@ -1,0 +1,118 @@
+name: Dart Format
+
+# 手动触发的格式化工具。
+#
+# 存在的理由：不是每台开发机都装了 Flutter，而 `dart format` 只能在有 Dart
+# 的环境跑，于是仓库里可能积累一些超过 80 列的行。它们平时不报错
+# —— pr-check 的 `Dart format (changed files only)` 只检查 PR 里改动过的文件
+# —— 但将来第一个碰到这些文件的 PR 会莫名其妙地红，且原因跟那个 PR 无关。
+#
+# 所以：需要时手动跑一次，把整棵树格式化干净。
+#
+#   gh workflow run format.yml --repo <owner>/<repo> --ref main
+#
+# 默认只报告不提交（check_only），确认没问题再跑一次带提交的。
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_only:
+        description: '只报告需要格式化的文件，不提交'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dart-format
+  cancel-in-progress: false
+
+jobs:
+  format:
+    name: 格式化 Dart 代码
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.1'
+          channel: stable
+          cache: true
+
+      # lib/secrets/fallback.dart 被 .gitignore 排除却被 import。
+      # dart format 不需要它能编译，但 flutter pub get 需要，所以照旧注入。
+      - name: Inject fallback
+        run: |
+          mkdir -p lib/secrets
+          cat > lib/secrets/fallback.dart <<'EOF'
+          const String siliconflowFallbackKey = '';
+          EOF
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: 格式化前的超宽行统计
+        run: |
+          set -euo pipefail
+          DIRS=""
+          for d in lib test integration_test tool; do [ -d "$d" ] && DIRS="$DIRS $d"; done
+          echo "扫描目录：$DIRS"
+          # shellcheck disable=SC2086
+          n=$(find $DIRS -name '*.dart' -type f -print0 \
+              | { xargs -0 grep -hE '.{81,}' 2>/dev/null || true; } | wc -l | tr -d ' ')
+          echo "超过 80 列的行：$n"
+
+      - name: dart format
+        id: fmt
+        run: |
+          set -euo pipefail
+          DIRS=""
+          for d in lib test integration_test tool; do [ -d "$d" ] && DIRS="$DIRS $d"; done
+          # shellcheck disable=SC2086
+          dart format $DIRS
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 已经是格式化过的，无改动"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "── 需要格式化的文件 ──"
+            git diff --stat
+            {
+              echo "### dart format 改动"
+              echo ''
+              echo '```'
+              git diff --stat | tail -30
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 提交格式化结果
+        if: steps.fmt.outputs.changed == 'true' && inputs.check_only != true
+        run: |
+          set -euo pipefail
+          git config user.name  'dart-format[bot]'
+          git config user.email 'dart-format@users.noreply.github.com'
+          git add -A
+          # ⚠️ 多行 commit message 用 heredoc 写到文件再 -F 读入。
+          #    直接写在 -m "..." 里的话，续行在 YAML 中处于第 0 列，
+          #    会截断块标量导致整个 workflow 解析失败。
+          #    heredoc 的内容与结束符必须与块标量同缩进 —— YAML 剥掉这层
+          #    公共缩进后，shell 看到的才是顶格的 heredoc。
+          cat > /tmp/msg.txt <<'MSG'
+          style: dart format
+
+          由 format.yml 自动执行。统一格式化整棵树，
+          免得将来第一个碰到这些文件的 PR 被 pr-check 判红。
+          MSG
+          git commit -q -F /tmp/msg.txt
+          git push
+          echo "已提交并推送"
+
+      - name: 提示（check_only 模式）
+        if: steps.fmt.outputs.changed == 'true' && inputs.check_only == true
+        run: |
+          echo "::notice::有文件需要格式化。确认上面的 diff --stat 后，"
+          echo "::notice::重新触发本 workflow 并把 check_only 设为 false 即可提交。"

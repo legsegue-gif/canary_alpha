@@ -361,6 +361,22 @@ class _AboutPageState extends State<AboutPage> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
+                          const SizedBox(height: 4),
+                          // AGPL-3.0 §5(a) 要求的修改声明。刻意不走 l10n：
+                          // 署名声明按惯例不翻译，且能避免每次改动都要重跑
+                          // flutter gen-l10n（本机无 Flutter，跑不了）。
+                          //
+                          // ⚠️ 这行是法律义务，必须逐字保留。别「顺手」改掉。
+                          Text(
+                            'Based on Kelivo (AGPL-3.0), modified 2026',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: cs.onSurface.withValues(alpha: 0.45),
+                              height: 1.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
                       ),
                     ),
@@ -400,7 +416,9 @@ class _AboutPageState extends State<AboutPage> {
                 icon: Lucide.Earth,
                 label: l10n.aboutPageWebsite,
                 onTap: () async {
-                  final uri = Uri.parse('https://github.com/legsegue-gif/canary_alpha');
+                  final uri = Uri.parse(
+                    'https://github.com/legsegue-gif/canary_alpha',
+                  );
                   if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
                   }
@@ -411,7 +429,8 @@ class _AboutPageState extends State<AboutPage> {
                 context,
                 svgAsset: 'assets/icons/github.svg',
                 label: l10n.aboutPageGithub,
-                onTap: () => _openUrl('https://github.com/legsegue-gif/canary_alpha'),
+                onTap: () =>
+                    _openUrl('https://github.com/legsegue-gif/canary_alpha'),
               ),
               _iosDivider(context),
               _iosNavRow(

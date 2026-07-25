@@ -23,23 +23,17 @@
 
 ## 🚀 下载
 
-[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://github.com/legsegue-gif/canary_alpha)
-
-
 🔗 [下载最新版本](https://github.com/legsegue-gif/canary_alpha/releases/latest)
 
-🔗 [TestFlight](https://github.com/legsegue-gif/canary_alpha) 参与测试版体验。
-
-## 💖 赞助
-
-感谢 [siliconflow.cn](https://siliconflow.cn) 与我们合作提供可免费使用的模型。
+macOS 版本使用 Developer ID 证书签名并已通过 Apple 公证，
+打开时无需执行 `xattr -dr com.apple.quarantine`。
 
 ## ✨ 功能特性
 
 - 🎨 **现代化设计** - Material You 设计语言，支持动态主题色(Android12+)
 - 🌙 **深色模式** - 完美适配深色主题，保护您的眼睛
 - 🌍 **多语言支持** - 支持中文和英文界面
-- 🖥️ **多平台支持** - 移动端与桌面端均支持（Android/iOS/Harmony、Windows/macOS/Linux）
+- 🖥️ **多平台支持** - 移动端与桌面端均支持（Android/iOS、Windows/macOS/Linux）
 - 🔄 **多供应商支持** - 支持 OpenAI、Google Gemini、Anthropic 等主流 AI 供应商
 - 🤖 **自定义助手** - 创建和管理个性化 AI 助手
 - 🖼️ **多模态输入** - 支持图片、文本文档、PDF、Word 文档等多种格式
@@ -59,7 +53,6 @@
 
 - ✅ Android
 - ✅ iOS
-- ✅ Harmony ([canary-ohos](https://github.com/legsegue-gif/canary_alpha))
 - ✅ Windows
 - ✅ macOS
 - ✅ Linux
@@ -76,7 +69,7 @@
 
 ## ❤️ 致谢
 
-特别感谢 [RikkaHub](https://github.com/re-ovo/rikkahub) 项目提供的 UI 设计灵感。Canary 的界面设计深受 RikkaHub 优美且实用的设计启发。
+特别感谢 [RikkaHub](https://github.com/re-ovo/rikkahub) 项目提供的 UI 设计灵感。界面设计深受 RikkaHub 优美且实用的设计启发。
 
 ## ⭐ Star History
 

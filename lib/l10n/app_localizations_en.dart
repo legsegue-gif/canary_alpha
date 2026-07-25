@@ -3789,7 +3789,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aboutPageJoinQQGroup => 'Join our QQ Group';
 
   @override
-  String get aboutPageQQGroupOne => 'Canary Group 1';
+  String get aboutPageQQGroupOne => 'Canary Group';
 
   @override
   String get aboutPageQQGroupTwo => 'Canary Group 2';

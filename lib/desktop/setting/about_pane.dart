@@ -166,14 +166,17 @@ class _DesktopAboutPaneState extends State<DesktopAboutPane> {
                   _DeskNavRow(
                     icon: lucide.Lucide.Earth,
                     label: l10n.aboutPageWebsite,
-                    onTap: () => _openUrl('https://github.com/legsegue-gif/canary_alpha'),
+                    onTap: () => _openUrl(
+                      'https://github.com/legsegue-gif/canary_alpha',
+                    ),
                   ),
                   const _DeskRowDivider(),
                   _DeskNavRowSvg(
                     svgAsset: 'assets/icons/github.svg',
                     label: l10n.aboutPageGithub,
-                    onTap: () =>
-                        _openUrl('https://github.com/legsegue-gif/canary_alpha'),
+                    onTap: () => _openUrl(
+                      'https://github.com/legsegue-gif/canary_alpha',
+                    ),
                   ),
                   const _DeskRowDivider(),
                   _DeskNavRow(
@@ -194,13 +197,6 @@ class _DesktopAboutPaneState extends State<DesktopAboutPane> {
                     svgAsset: 'assets/icons/discord.svg',
                     label: l10n.aboutPageJoinDiscord,
                     onTap: () => _openUrl('https://discord.gg/5BXdVPyen'),
-                  ),
-                  const _DeskRowDivider(),
-                  // Donation item (desktop): mirrors mobile "Sponsor"
-                  _DeskNavRow(
-                    icon: lucide.Lucide.Heart,
-                    label: l10n.settingsPageSponsor,
-                    onTap: () => _showSponsorDesktopDialog(context),
                   ),
                 ],
               ),
@@ -303,6 +299,21 @@ class _AppHeaderCardState extends State<_AppHeaderCard> {
                             height: 1.2,
                           ),
                           maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        // AGPL-3.0 §5(a) 要求的修改声明，与移动端 about_page.dart
+                        // 保持一致。同样刻意不走 l10n。
+                        //
+                        // ⚠️ 这行是法律义务，必须逐字保留。别「顺手」改掉。
+                        Text(
+                          'Based on Kelivo (AGPL-3.0), modified 2026',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: cs.onSurface.withValues(alpha: 0.45),
+                            height: 1.2,
+                          ),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -571,156 +582,4 @@ class _DeskNavRowSvgState extends State<_DeskNavRowSvg> {
       ),
     );
   }
-}
-
-Future<void> _showSponsorDesktopDialog(BuildContext context) async {
-  final cs = Theme.of(context).colorScheme;
-  final l10n = AppLocalizations.of(context)!;
-  final isDark = Theme.of(context).brightness == Brightness.dark;
-  const afdianUrl = 'https://github.com/legsegue-gif/canary_alpha';
-  final wechatQrUrl = isDark
-      ? 'https://c.img.dasctf.com/LightPicture/2025/10/ee10ae78acbd01f3.png'
-      : 'https://c.img.dasctf.com/LightPicture/2025/10/6ba60ac0f2f8e2b4.png';
-
-  Future<void> open(String url) async {
-    final uri = Uri.parse(url);
-    try {
-      if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {
-      await launchUrl(uri);
-    }
-  }
-
-  await showDialog<void>(
-    context: context,
-    barrierDismissible: true,
-    builder: (ctx) {
-      final isDark = Theme.of(ctx).brightness == Brightness.dark;
-      return Dialog(
-        backgroundColor: cs.surface,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        l10n.settingsPageSponsor,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: AppFontWeights.emphasis,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: l10n.mcpPageClose,
-                      icon: Icon(
-                        lucide.Lucide.X,
-                        size: 18,
-                        color: cs.onSurface,
-                      ),
-                      onPressed: () => Navigator.of(ctx).maybePop(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // Methods card
-                _DeskCard(
-                  title: l10n.sponsorPageMethodsSectionTitle,
-                  children: [
-                    _DeskNavRow(
-                      icon: lucide.Lucide.Heart,
-                      label: l10n.sponsorPageAfdianTitle,
-                      onTap: () => open(afdianUrl),
-                    ),
-                    const _DeskRowDivider(),
-                    _DeskNavRow(
-                      icon: lucide.Lucide.Link,
-                      label: l10n.sponsorPageWeChatTitle,
-                      onTap: () => open(wechatQrUrl),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // WeChat QR preview card (inline)
-                _DeskCard(
-                  title: l10n.sponsorPageWeChatTitle,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      child: Center(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: cs.outlineVariant.withValues(
-                                alpha: isDark ? 0.14 : 0.18,
-                              ),
-                            ),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Image.network(
-                            wechatQrUrl,
-                            width: 220,
-                            height: 220,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              width: 220,
-                              height: 220,
-                              color: cs.surface,
-                              alignment: Alignment.center,
-                              child: Icon(
-                                lucide.Lucide.ImageOff,
-                                color: cs.onSurface.withValues(alpha: 0.5),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      child: Center(
-                        child: Text(
-                          l10n.sponsorPageScanQrHint,
-                          style: TextStyle(
-                            color: cs.onSurface.withValues(alpha: 0.6),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 6),
-                // Align(
-                //   alignment: Alignment.centerRight,
-                //   child: TextButton(
-                //     onPressed: () => Navigator.of(ctx).maybePop(),
-                //     child: Text(l10n.mcpPageClose, style: TextStyle(color: cs.primary)),
-                //   ),
-                // ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
 }

@@ -1,0 +1,144 @@
+name: Release
+
+# 真正的 CD：推一个 tag 就发一个版本，不用去 Actions 页面填表单。
+#
+#   git tag v1.1.17-canary.2 && git push origin v1.1.17-canary.2
+#
+# 五个平台全打、产物挂到 Release。构建逻辑不在这里重复一遍 ——
+# 通过 workflow_call 复用 build-stable-44.yml，那是唯一的构建真相来源。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 默认收紧到只读；需要写权限的 job 各自声明（见下方 build）。
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false     # 发布跑到一半被取消会留下半套产物
+
+jobs:
+  # ── 版本一致性闸门 ─────────────────────────────────────────────────────────
+  #
+  # 这个仓库有**两个独立的版本号来源**，天然会脱节：
+  #
+  #   pubspec.yaml   1.1.17+61          上游的。每次同步都会被 rsync 覆盖，
+  #                                     我们无权改动。
+  #   git tag        v1.1.17-canary.2   我们的。手打。
+  #
+  # 能自由决定的其实只有 `-canary.N` 那一截。所以约定 tag 格式为
+  #
+  #     v<上游版本>-canary.<迭代号>
+  #
+  # 并在这里断言 <上游版本> 与 pubspec 完全一致。不一致就立刻红，
+  # 五个平台一个都不会启动。
+  #
+  # 不做这道闸门的后果：tag 打成 v1.1.18-canary.1 而 pubspec 还是 1.1.17，
+  # Release 页面写着 1.1.18、装上去的 app 在关于页显示 1.1.17 ——
+  # 没人会怀疑到版本号上，只会觉得「更新没生效」。
+  verify:
+    name: 校验 tag 与 pubspec 一致
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # 末尾要预建 Release，见该步骤的说明
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: check
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "推送的 tag：$TAG"
+
+          if ! printf '%s' "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+$'; then
+            cat <<MSG
+          ❌ tag 格式不对：$TAG
+
+             期望：v<上游版本>-canary.<迭代号>，例如 v1.1.17-canary.2
+             其中 <上游版本> 必须与 pubspec.yaml 的 version 一致（+ 之前的部分）。
+          MSG
+            exit 1
+          fi
+
+          # v1.1.17-canary.2 → 1.1.17
+          TAG_VER="${TAG#v}"; TAG_VER="${TAG_VER%%-canary.*}"
+          # 1.1.17+61 → 1.1.17
+          PUB_FULL="$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)"
+          PUB_VER="${PUB_FULL%%+*}"
+
+          echo "tag 里的上游版本：$TAG_VER"
+          echo "pubspec 的版本　 ：${PUB_FULL}（取 ${PUB_VER}）"
+
+          if [ "$TAG_VER" != "$PUB_VER" ]; then
+            cat <<MSG
+          ❌ 版本不一致：tag 说 ${TAG_VER}，pubspec.yaml 说 $PUB_VER
+
+             这两个是独立来源，必须手工对齐：
+               · 想发当前代码 → 把 tag 改成 v${PUB_VER}-canary.N
+               · pubspec 该升级了 → 那得先同步上游（pubspec 由上游决定，
+                 我们不自己改版本号）
+          MSG
+            exit 1
+          fi
+
+          # -canary.N 一律按预发布处理。这是上游的 fork，不是上游本身，
+          # 默认别让人误以为是正式版。
+          echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          echo "✅ 版本一致，可以发布"
+
+      # ⚠️ 必须在构建**之前**把 Release 建出来，否则五个平台并行时会撞车。
+      #
+      # softprops/action-gh-release 的逻辑是「先查，查不到就创建」。五个 job
+      # 几乎同时跑到这一步，都查不到、于是都去创建，最先到的成功，其余的
+      # 拿到 Validation Failed: {"code":"already_exists"} 然后**整个 job 失败**，
+      # 连已经构建好的产物都不会上传。
+      #
+      # 首次 CD 实测就是这么挂的：Android 与 macOS 双双倒在发布这一步，
+      # 而它们的构建其实全都成功了。上一次手动触发没撞上，纯粹是因为各平台
+      # 完成时间恰好错开 —— 这种 bug 平时不出现，越是并行度高越容易咬人。
+      #
+      # 先建好，后面五个 job 就都走「更新现有 Release」路径，天然幂等。
+      - name: 预建 Release（避免五个平台并行创建时撞车）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过创建"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --prerelease \
+              --notes "由 tag 推送自动构建。产物在下方陆续上传。"
+            echo "已创建 Release $TAG"
+          fi
+
+  build:
+    name: 构建并发布
+    needs: verify
+    # ⚠️ 必须在这里显式放开权限。可复用 workflow **不能索取比调用方更多的权限**，
+    #    而 build-stable-44.yml 的五个 job 都声明了 permissions: write-all
+    #    （上游写法，发 Release 需要）。调用方若只给 contents: write，
+    #    整个 run 会以 startup_failure 收场 —— 而且没有任何 job 日志可看，
+    #    页面只说「likely failed because of a workflow file issue」。
+    #    第一次实测就是这么挂的，actionlint 也查不出来。
+    permissions: write-all
+    # 复用手动构建那套逻辑，不在这里复制粘贴 800 行 YAML。
+    uses: ./.github/workflows/build-stable-44.yml
+    secrets: inherit          # 签名与公证的 6 个 secret 都在被调用方用到
+    with:
+      build_android: true
+      build_ios: true
+      build_mac: true
+      build_windows: true
+      build_linux: true
+      publish_release: true
+      release_tag: ${{ needs.verify.outputs.tag }}
+      prerelease: true

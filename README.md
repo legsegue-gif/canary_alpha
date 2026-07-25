@@ -24,22 +24,17 @@ English | [简体中文](README_ZH_CN.md)
 
 ## 🚀 Download
 
-[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://github.com/legsegue-gif/canary_alpha)
-
 🔗 [Download the latest version](https://github.com/legsegue-gif/canary_alpha/releases/latest)
 
-🔗 [TestFlight](https://github.com/legsegue-gif/canary_alpha) for beta testing.
-
-## 💖 Sponsors
-
-Thanks to [siliconflow.cn](https://siliconflow.cn) for providing free models in cooperation with us.
+macOS builds are signed with a Developer ID certificate and notarized by Apple,
+so they open without `xattr -dr com.apple.quarantine`.
 
 ## ✨ Features
 
 - 🎨 **Modern Design** - Material You design language with dynamic color theming support (Android 12+).
 - 🌙 **Dark Mode** - Perfectly adapted dark theme to protect your eyes.
 - 🌍 **Multi-language Support** - Supports both English and Chinese interfaces.
-- 🖥️ **Multi-platform Support** - Mobile (Android/iOS/Harmony) and Desktop (Windows/macOS/Linux).
+- 🖥️ **Multi-platform Support** - Mobile (Android/iOS) and Desktop (Windows/macOS/Linux).
 - 🔄 **Multi-provider Support** - Supports major AI providers like OpenAI, Google Gemini, Anthropic, etc.
 - 🤖 **Custom Assistants** - Create and manage personalized AI assistants.
 - 🖼️ **Multimodal Input** - Supports various formats including images, text documents, PDFs, Word documents, etc.
@@ -59,7 +54,6 @@ Thanks to [siliconflow.cn](https://siliconflow.cn) for providing free models in 
 
 - ✅ Android
 - ✅ iOS
-- ✅ Harmony ([canary-ohos](https://github.com/legsegue-gif/canary_alpha))
 - ✅ Windows
 - ✅ macOS
 - ✅ Linux
@@ -76,7 +70,7 @@ Pull Requests and Issues are welcome!
 
 ## ❤️ Acknowledgements
 
-Special thanks to the [RikkaHub](https://github.com/re-ovo/rikkahub) project for the UI design inspiration. Canary's interface design is heavily inspired by RikkaHub's beautiful and practical design.
+Special thanks to the [RikkaHub](https://github.com/re-ovo/rikkahub) project for the UI design inspiration. The interface design is heavily inspired by RikkaHub's beautiful and practical design.
 
 ## ⭐ Star History
 

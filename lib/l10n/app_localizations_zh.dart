@@ -3654,7 +3654,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get aboutPageJoinQQGroup => '加入QQ群';
 
   @override
-  String get aboutPageQQGroupOne => 'Canary 一群';
+  String get aboutPageQQGroupOne => 'Canary 交流群';
 
   @override
   String get aboutPageQQGroupTwo => 'Canary 二群';
@@ -8972,7 +8972,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get aboutPageJoinQQGroup => '加入QQ群';
 
   @override
-  String get aboutPageQQGroupOne => 'Canary 一群';
+  String get aboutPageQQGroupOne => 'Canary 交流群';
 
   @override
   String get aboutPageQQGroupTwo => 'Canary 二群';
@@ -14288,7 +14288,7 @@ class AppLocalizationsZhHant extends AppLocalizationsZh {
   String get aboutPageJoinQQGroup => '加入 QQ 群';
 
   @override
-  String get aboutPageQQGroupOne => 'Canary 一群';
+  String get aboutPageQQGroupOne => 'Canary 交流群';
 
   @override
   String get aboutPageQQGroupTwo => 'Canary 二群';

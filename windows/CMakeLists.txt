@@ -32,6 +32,23 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# MSVC 14.51（VS 2026 / windows-latest 镜像）把 <experimental/coroutine> 从
+# 弃用警告升级成了硬错误 STL1011，插件 permission_handler_windows 与
+# webview_windows 仍在用它，导致 `flutter build windows` 直接失败：
+#
+#   error C2338: static assertion failed: 'error STL1011: The /await compiler
+#   option, <experimental/coroutine>, ... are deprecated by Microsoft and will
+#   be REMOVED SOON.'
+#
+# 这是微软文档给出的逃生开关。放在这里（而不是 APPLY_STANDARD_SETTINGS 里）
+# 是因为它必须在 add_subdirectory(flutter) 之前生效 —— 插件子项目由
+# flutter/generated_plugins.cmake 添加，目录级定义会向下传导，
+# 而 APPLY_STANDARD_SETTINGS 只作用于显式调用它的 target。
+#
+# ⚠️ 这是临时措施。等上游插件迁移到 C++20 <coroutine> 之后应当移除，
+#    否则真到「REMOVED SOON」那天会以同样难查的方式再挂一次。
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

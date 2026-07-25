@@ -17,14 +17,12 @@ class _QQGroupEntry {
   final String joinUrl;
 }
 
+// Canary 只有一个 QQ 群。
+// 列表结构保留：将来加群只需再 append 一条。
 List<_QQGroupEntry> _groups(AppLocalizations l10n) => <_QQGroupEntry>[
   _QQGroupEntry(
     name: l10n.aboutPageQQGroupOne,
     joinUrl: 'https://qm.qq.com/q/eAqLIYo4LK',
-  ),
-  _QQGroupEntry(
-    name: l10n.aboutPageQQGroupTwo,
-    joinUrl: 'https://qm.qq.com/q/7t6VEqSXhm',
   ),
 ];
 

@@ -5,7 +5,10 @@ env:
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main, baseline]
+  # analyze 与 test 只存在于本 workflow，build workflow 里没有任何检查步骤。
+  # 没有手动触发就必须开 PR 才能跑测试。
+  workflow_dispatch:
 
 jobs:
   checks:
@@ -14,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -24,6 +27,17 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      # lib/secrets/fallback.dart 被 .gitignore 排除，却被 model_provider.dart:11
+      # 和 chat_api_service.dart:16 import。所有 build workflow 都有这一步，
+      # 唯独 pr-check.yml 漏了 —— 缺它，下面的 dart analyze --fatal-infos 必然失败。
+      - name: Inject fallback
+        shell: bash
+        run: |
+          mkdir -p lib/secrets
+          cat > lib/secrets/fallback.dart <<'EOF'
+          const String siliconflowFallbackKey = '${{ secrets.SILICONFLOW_KEY }}';
+          EOF
 
       - name: Flutter pub get
         run: flutter pub get

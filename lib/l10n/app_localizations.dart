@@ -7091,7 +7091,7 @@ abstract class AppLocalizations {
   /// No description provided for @aboutPageQQGroupOne.
   ///
   /// In en, this message translates to:
-  /// **'Canary Group 1'**
+  /// **'Canary Group'**
   String get aboutPageQQGroupOne;
 
   /// No description provided for @aboutPageQQGroupTwo.
