@@ -25,15 +25,15 @@ jobs:
   #
   # 这个仓库有**两个独立的版本号来源**，天然会脱节：
   #
-  #   pubspec.yaml   1.1.17+61          上游的。每次同步都会被 rsync 覆盖，
-  #                                     我们无权改动。
-  #   git tag        v1.1.17-canary.2   我们的。手打。
+  #   pubspec.yaml   1.1.17+61          应用版本，随 baseline 分支更新，
+  #                                     不在这里手工维护。
+  #   git tag        v1.1.17-canary.2   发布迭代号，手打。
   #
   # 能自由决定的其实只有 `-canary.N` 那一截。所以约定 tag 格式为
   #
-  #     v<上游版本>-canary.<迭代号>
+  #     v<应用版本>-canary.<迭代号>
   #
-  # 并在这里断言 <上游版本> 与 pubspec 完全一致。不一致就立刻红，
+  # 并在这里断言 <应用版本> 与 pubspec 完全一致。不一致就立刻红，
   # 五个平台一个都不会启动。
   #
   # 不做这道闸门的后果：tag 打成 v1.1.18-canary.1 而 pubspec 还是 1.1.17，
@@ -46,7 +46,6 @@ jobs:
       contents: write        # 末尾要预建 Release，见该步骤的说明
     outputs:
       tag: ${{ steps.check.outputs.tag }}
-      prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
 
@@ -61,8 +60,8 @@ jobs:
             cat <<MSG
           ❌ tag 格式不对：$TAG
 
-             期望：v<上游版本>-canary.<迭代号>，例如 v1.1.17-canary.2
-             其中 <上游版本> 必须与 pubspec.yaml 的 version 一致（+ 之前的部分）。
+             期望：v<应用版本>-canary.<迭代号>，例如 v1.1.17-canary.2
+             其中 <应用版本> 必须与 pubspec.yaml 的 version 一致（+ 之前的部分）。
           MSG
             exit 1
           fi
@@ -73,7 +72,7 @@ jobs:
           PUB_FULL="$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml | head -1)"
           PUB_VER="${PUB_FULL%%+*}"
 
-          echo "tag 里的上游版本：$TAG_VER"
+          echo "tag 里的应用版本：$TAG_VER"
           echo "pubspec 的版本　 ：${PUB_FULL}（取 ${PUB_VER}）"
 
           if [ "$TAG_VER" != "$PUB_VER" ]; then
@@ -82,15 +81,11 @@ jobs:
 
              这两个是独立来源，必须手工对齐：
                · 想发当前代码 → 把 tag 改成 v${PUB_VER}-canary.N
-               · pubspec 该升级了 → 那得先同步上游（pubspec 由上游决定，
-                 我们不自己改版本号）
+               · pubspec 该升级了 → 版本号跟随 baseline，先更新 baseline
           MSG
             exit 1
           fi
 
-          # -canary.N 一律按预发布处理。这是上游的 fork，不是上游本身，
-          # 默认别让人误以为是正式版。
-          echo "prerelease=true" >> "$GITHUB_OUTPUT"
           echo "✅ 版本一致，可以发布"
 
       # ⚠️ 必须在构建**之前**把 Release 建出来，否则五个平台并行时会撞车。
@@ -115,7 +110,7 @@ jobs:
             echo "Release $TAG 已存在，跳过创建"
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "$TAG" --prerelease \
+              --title "$TAG" \
               --notes "由 tag 推送自动构建。产物在下方陆续上传。"
             echo "已创建 Release $TAG"
           fi
@@ -125,7 +120,7 @@ jobs:
     needs: verify
     # ⚠️ 必须在这里显式放开权限。可复用 workflow **不能索取比调用方更多的权限**，
     #    而 build-stable-44.yml 的五个 job 都声明了 permissions: write-all
-    #    （上游写法，发 Release 需要）。调用方若只给 contents: write，
+    #    （被调用方的写法，发 Release 需要）。调用方若只给 contents: write，
     #    整个 run 会以 startup_failure 收场 —— 而且没有任何 job 日志可看，
     #    页面只说「likely failed because of a workflow file issue」。
     #    第一次实测就是这么挂的，actionlint 也查不出来。
@@ -141,4 +136,7 @@ jobs:
       build_linux: true
       publish_release: true
       release_tag: ${{ needs.verify.outputs.tag }}
-      prerelease: true
+      # 显式写死 false：`-canary.N` 是发布迭代号，不是测试版标记。
+      # 标成 Pre-release 会让 /releases/latest 变空 —— README 的主下载链接
+      # 正是指向那里，曾经因此失效。
+      prerelease: false

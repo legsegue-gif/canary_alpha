@@ -53,8 +53,8 @@ on:
         default: ''
         type: string
 
-      # 上游遗漏：五个 job 的「发布到 Release」步骤都写了
-      # prerelease: ${{ github.event.inputs.prerelease }}，但这个 input 从未定义。
+      # 这个 input 曾经缺失：五个 job 的「发布到 Release」步骤都写了
+      # prerelease: ${{ github.event.inputs.prerelease }}，但 input 从未定义。
       # 未定义的表达式求值为空串，action 会把它当 false —— 于是无论怎么选，
       # 发出来的都是正式版而不是预发布版，且不报任何错。actionlint 能查出来。
       prerelease:
