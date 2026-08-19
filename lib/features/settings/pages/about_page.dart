@@ -15,6 +15,7 @@ import '../../../shared/widgets/qq_group_join_sheet.dart';
 import '../../../core/services/haptics.dart';
 import 'debug_page.dart';
 import 'log_viewer_page.dart';
+import 'package:Canary/theme/app_semantic_colors.dart';
 
 class AboutPage extends StatefulWidget {
   const AboutPage({super.key});
@@ -131,6 +132,77 @@ class _AboutPageState extends State<AboutPage> {
                                       children: [
                                         Expanded(
                                           child: Text(
+                                            l10n.contextLogSettingTitle,
+                                            style: TextStyle(
+                                              color: cs.onSurface.withValues(
+                                                alpha: 0.9,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        InkWell(
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                          onTap: () {
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    const LogViewerPage(
+                                                      initialTab: LogViewerPage
+                                                          .contextTab,
+                                                    ),
+                                              ),
+                                            );
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(6),
+                                            child: Icon(
+                                              Lucide.FolderOpen,
+                                              size: 20,
+                                              color: cs.primary,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        IosSwitch(
+                                          value: dialogContext
+                                              .watch<SettingsProvider>()
+                                              .contextLogEnabled,
+                                          onChanged: (v) => dialogContext
+                                              .read<SettingsProvider>()
+                                              .setContextLogEnabled(v),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    l10n.contextLogSettingSubtitle,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: cs.onSurface.withValues(
+                                        alpha: 0.65,
+                                      ),
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Material(
+                                  color: Colors.transparent,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 6,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
                                             l10n.requestLogSettingTitle,
                                             style: TextStyle(
                                               color: cs.onSurface.withValues(
@@ -148,7 +220,8 @@ class _AboutPageState extends State<AboutPage> {
                                               MaterialPageRoute(
                                                 builder: (_) =>
                                                     const LogViewerPage(
-                                                      initialTab: 0,
+                                                      initialTab: LogViewerPage
+                                                          .requestTab,
                                                     ),
                                               ),
                                             );
@@ -218,7 +291,8 @@ class _AboutPageState extends State<AboutPage> {
                                               MaterialPageRoute(
                                                 builder: (_) =>
                                                     const LogViewerPage(
-                                                      initialTab: 1,
+                                                      initialTab:
+                                                          LogViewerPage.appTab,
                                                     ),
                                               ),
                                             );
@@ -454,9 +528,7 @@ Widget _iosSectionCard({required List<Widget> children}) {
       final theme = Theme.of(context);
       final cs = theme.colorScheme;
       final isDark = theme.brightness == Brightness.dark;
-      final Color bg = isDark
-          ? Colors.white10
-          : Colors.white.withValues(alpha: 0.96);
+      final Color bg = context.appColors.surfaceCard;
       return Container(
         decoration: BoxDecoration(
           color: bg,
@@ -498,9 +570,9 @@ class _AnimatedPressColor extends StatelessWidget {
   final Widget Function(Color color) builder;
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cs = Theme.of(context).colorScheme;
     final target = pressed
-        ? (Color.lerp(base, isDark ? Colors.black : Colors.white, 0.55) ?? base)
+        ? (Color.lerp(base, cs.surface, 0.55) ?? base)
         : base;
     return TweenAnimationBuilder<Color?>(
       tween: ColorTween(end: target),
