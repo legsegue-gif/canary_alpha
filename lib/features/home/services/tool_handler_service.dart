@@ -7,10 +7,14 @@ import '../../../core/models/assistant.dart';
 import '../../../core/providers/assistant_provider.dart';
 import '../../../core/providers/mcp_provider.dart';
 import '../../../core/providers/memory_provider.dart';
+import '../../../core/providers/memory_provider_v2.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/providers/tts_provider.dart';
 import '../../../core/services/api/chat_api_service.dart';
+import '../../../core/services/chat/chat_service.dart';
 import '../../../core/services/mcp/mcp_tool_service.dart';
+import '../../../core/services/memory/memory_pipeline.dart';
+import '../../../core/services/memory/memory_tools.dart';
 import '../../../core/services/search/search_tool_service.dart';
 import 'ask_user_interaction_service.dart';
 import 'local_tools_service.dart';
@@ -20,7 +24,7 @@ import 'tool_approval_service.dart';
 ///
 /// 处理各类工具调用：
 /// - MCP 工具
-/// - Memory 工具 (create/edit/delete)
+/// - Memory 工具 (§10)
 /// - Search 工具
 class ToolHandlerService {
   ToolHandlerService({required this.contextProvider});
@@ -107,6 +111,14 @@ class ToolHandlerService {
       m['properties'] = norm;
     }
 
+    // additionalProperties can itself be a schema.
+    if (m['additionalProperties'] is Map) {
+      m['additionalProperties'] = _sanitizeNode(
+        m['additionalProperties'],
+        kind,
+      );
+    }
+
     // Keep only allowed keys based on provider
     Set<String> allowed;
     switch (kind) {
@@ -129,6 +141,7 @@ class ToolHandlerService {
           'required',
           'items',
           'enum',
+          'additionalProperties',
         };
         break;
     }
@@ -159,12 +172,35 @@ class ToolHandlerService {
   // Tool Definitions Builder
   // ============================================================================
 
+  McpToolRouteSnapshot captureMcpToolRoutes(Assistant? assistant) {
+    return contextProvider.read<McpToolService>().captureRoutesForAssistant(
+      contextProvider.read<McpProvider>(),
+      contextProvider.read<AssistantProvider>(),
+      assistantId: assistant?.id,
+    );
+  }
+
   /// Build tool definitions for API call.
   ///
   /// Returns a list of tool definitions including:
   /// - Search tool (if enabled and model supports tools)
-  /// - Memory tools (if assistant has memory enabled)
+  /// - Memory tools (if assistant has memory / past-recall enabled)
   /// - MCP tools (from selected servers for the assistant)
+  /// Whether the chat being generated is a throwaway one.
+  ///
+  /// Tool definitions are built without a conversation id, so this reads the
+  /// active conversation the same way the tool handler does.
+  bool _isTemporaryConversation() {
+    try {
+      final chatService = contextProvider.read<ChatService>();
+      return chatService.isTemporaryConversation(
+        chatService.currentConversationId,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
   List<Map<String, dynamic>> buildToolDefinitions(
     SettingsProvider settings,
     Assistant? assistant,
@@ -172,6 +208,7 @@ class ToolHandlerService {
     String modelId,
     bool hasBuiltInSearch, {
     required bool Function(String providerKey, String modelId) isToolModel,
+    McpToolRouteSnapshot? mcpRouteSnapshot,
   }) {
     final List<Map<String, dynamic>> toolDefs = <Map<String, dynamic>>[];
     final supportsTools = isToolModel(providerKey, modelId);
@@ -183,9 +220,21 @@ class ToolHandlerService {
       toolDefs.add(SearchToolService.getToolDefinition());
     }
 
-    // Memory tools
-    if (assistant?.enableMemory == true && supportsTools) {
-      toolDefs.addAll(_buildMemoryToolDefinitions());
+    // Memory tools (§10.1)
+    if (settings.legacyMemoryMode) {
+      if (assistant?.enableMemory == true && supportsTools) {
+        toolDefs.addAll(_buildLegacyMemoryToolDefinitions());
+      }
+    } else if (supportsTools && assistant != null) {
+      toolDefs.addAll(
+        MemoryTools.buildDefinitions(
+          lang: settings.resolvedMemoryPromptLang,
+          writeScope: assistant.memoryWriteScope,
+          enableMemory: assistant.enableMemory,
+          allowPastConversationRecall: assistant.allowPastConversationRecall,
+          allowMemoryWrites: !_isTemporaryConversation(),
+        ),
+      );
     }
 
     // Local tools
@@ -202,14 +251,15 @@ class ToolHandlerService {
       assistant: assistant,
       providerKey: providerKey,
       supportsTools: supportsTools,
+      mcpRouteSnapshot: mcpRouteSnapshot,
     );
     toolDefs.addAll(mcpTools);
 
     return toolDefs;
   }
 
-  /// Build memory tool definitions (create/edit/delete).
-  List<Map<String, dynamic>> _buildMemoryToolDefinitions() {
+  /// Legacy create/edit/delete_memory tool schemas (pre-v2 memory system).
+  List<Map<String, dynamic>> _buildLegacyMemoryToolDefinitions() {
     return [
       {
         'type': 'function',
@@ -275,6 +325,7 @@ class ToolHandlerService {
     required Assistant? assistant,
     required String providerKey,
     required bool supportsTools,
+    McpToolRouteSnapshot? mcpRouteSnapshot,
   }) {
     if (!supportsTools) return [];
 
@@ -284,6 +335,7 @@ class ToolHandlerService {
       mcp,
       contextProvider.read<AssistantProvider>(),
       assistant?.id,
+      routeSnapshot: mcpRouteSnapshot,
     );
 
     if (tools.isEmpty) return [];
@@ -335,19 +387,28 @@ class ToolHandlerService {
   /// Returns a function that handles tool calls by name and arguments.
   /// Supports:
   /// - Search tool calls
-  /// - Memory tool calls (create/edit/delete)
+  /// - Memory tool calls (§10)
   /// - MCP tool calls
   ToolCallHandler? buildToolCallHandler(
     SettingsProvider settings,
     Assistant? assistant, {
     ToolApprovalService? approvalService,
     AskUserInteractionService? askUserService,
+    String? conversationId,
+    McpToolRouteSnapshot? mcpRouteSnapshot,
   }) {
     final mcp = contextProvider.read<McpProvider>();
     final toolSvc = contextProvider.read<McpToolService>();
     // Capture AssistantProvider reference before async gap to avoid
     // use_build_context_synchronously warning
     final assistantProvider = contextProvider.read<AssistantProvider>();
+    final routes =
+        mcpRouteSnapshot ??
+        toolSvc.captureRoutesForAssistant(
+          mcp,
+          assistantProvider,
+          assistantId: assistant?.id,
+        );
 
     return (name, args, {toolCallId}) async {
       try {
@@ -359,9 +420,38 @@ class ToolHandlerService {
         }
 
         // Memory tools
-        final memoryResult = await _handleMemoryToolCall(name, args, assistant);
+        final memoryResult = await _handleMemoryToolCall(
+          name,
+          args,
+          assistant,
+          conversationId: conversationId,
+        );
         if (memoryResult != null) {
           return memoryResult;
+        }
+
+        // Creating calendar events modifies user data, so it always requires
+        // explicit user approval before the local tool runs.
+        if (name == LocalToolNames.calendarCreate &&
+            assistant != null &&
+            assistant.localToolIds.contains(LocalToolNames.calendarCreate) &&
+            approvalService != null) {
+          final approvalId = (toolCallId?.trim().isNotEmpty == true)
+              ? toolCallId!.trim()
+              : '${name}_${DateTime.now().microsecondsSinceEpoch}';
+          final approval = await approvalService.requestApproval(
+            toolCallId: approvalId,
+            toolName: name,
+            arguments: args,
+            conversationId: conversationId,
+          );
+          if (!approval.approved) {
+            return _toolError(
+              error: 'approval_denied',
+              message: approval.denyReason ?? 'User denied the tool call',
+              tool: name,
+            );
+          }
         }
 
         // Local tools
@@ -408,6 +498,7 @@ class ToolHandlerService {
                   ? toolCallId!.trim()
                   : '${name}_${DateTime.now().microsecondsSinceEpoch}',
               arguments: args,
+              conversationId: conversationId,
             );
             return result.toJsonString();
           } on AskUserInvalidRequestException catch (e) {
@@ -420,13 +511,21 @@ class ToolHandlerService {
         }
 
         // Approval gate for MCP tools
-        if (approvalService != null && mcp.toolNeedsApproval(name)) {
+        if (approvalService != null &&
+            toolSvc.toolNeedsApprovalForAssistant(
+              mcp,
+              assistantProvider,
+              assistantId: assistant?.id,
+              toolName: name,
+              routeSnapshot: routes,
+            )) {
           // Generate a unique id for this tool call approval request
           final toolCallId = '${name}_${DateTime.now().microsecondsSinceEpoch}';
           final result = await approvalService.requestApproval(
             toolCallId: toolCallId,
             toolName: name,
             arguments: args,
+            conversationId: conversationId,
           );
           if (!result.approved) {
             return _toolError(
@@ -444,6 +543,7 @@ class ToolHandlerService {
           assistantId: assistant?.id,
           toolName: name,
           arguments: args,
+          routeSnapshot: routes,
         );
         return text;
       } catch (e) {
@@ -460,10 +560,84 @@ class ToolHandlerService {
     };
   }
 
-  /// Handle memory tool calls (create/edit/delete).
+  /// Handle memory tool calls (§10).
   ///
-  /// Returns null if the tool is not a memory tool or memory is not enabled.
+  /// Returns null if the tool is not a memory tool or the relevant gate is off.
   Future<String?> _handleMemoryToolCall(
+    String name,
+    Map<String, dynamic> args,
+    Assistant? assistant, {
+    String? conversationId,
+  }) async {
+    final settings = contextProvider.read<SettingsProvider>();
+    if (settings.legacyMemoryMode) {
+      if (MemoryTools.allToolNames.contains(name)) return null;
+      return _handleLegacyMemoryToolCall(name, args, assistant);
+    }
+
+    if (assistant == null) return null;
+    if (!MemoryTools.allToolNames.contains(name)) return null;
+
+    final memoryV2 = contextProvider.read<MemoryProviderV2>();
+    ChatService? chatService;
+    try {
+      chatService = contextProvider.read<ChatService>();
+    } catch (_) {
+      chatService = null;
+    }
+
+    MemoryPipelineService? pipeline;
+    try {
+      pipeline = contextProvider.read<MemoryPipelineService>();
+    } catch (_) {
+      pipeline = null;
+    }
+
+    Future<String> Function(String prompt)? memoryLlmCall;
+    final provKey = settings.memoryModelProvider;
+    final mdlId = settings.memoryModelId;
+    if (provKey != null && mdlId != null) {
+      final cfg = settings.getProviderConfig(provKey);
+      final budget = settings.memoryModelThinkingEnabled
+          ? (assistant.thinkingBudget ?? settings.thinkingBudget)
+          : 0;
+      memoryLlmCall = (prompt) => ChatApiService.generateText(
+        config: cfg,
+        modelId: mdlId,
+        prompt: prompt,
+        thinkingBudget: budget,
+      );
+    }
+
+    final temporary =
+        chatService?.isTemporaryConversation(conversationId) ?? false;
+    return MemoryTools.handle(
+      name: name,
+      args: args,
+      assistant: assistant,
+      repository: memoryV2.repository,
+      chatRepository: memoryV2.chatRepository,
+      chatService: chatService,
+      conversationId: conversationId,
+      // Reload without changing which assistants the open memory UI is showing.
+      onMutated: memoryV2.reloadCurrentScope,
+      smartAdd: pipeline?.smartAdd,
+      promptLang: settings.resolvedMemoryPromptLang,
+      memoryLlmCall: memoryLlmCall,
+      smartAddPromptZh: settings.memorySmartAddPromptZh,
+      smartAddPromptEn: settings.memorySmartAddPromptEn,
+      // Temporary chats are discarded on exit; their tool traces must not linger.
+      traceRecorder: temporary ? null : pipeline?.traceRecorder,
+      conversationTitle: conversationId == null
+          ? null
+          : chatService?.getConversation(conversationId)?.title,
+    );
+  }
+
+  /// Handle legacy create/edit/delete_memory calls via [MemoryProvider].
+  ///
+  /// Returns null if memory is disabled or [name] is not a legacy memory tool.
+  Future<String?> _handleLegacyMemoryToolCall(
     String name,
     Map<String, dynamic> args,
     Assistant? assistant,
