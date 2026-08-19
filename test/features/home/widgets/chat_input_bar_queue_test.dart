@@ -1,3 +1,4 @@
+import "../../../support/business_test_harness.dart";
 import 'package:Canary/core/models/chat_input_data.dart';
 import 'package:Canary/core/providers/assistant_provider.dart';
 import 'package:Canary/core/providers/settings_provider.dart';
@@ -36,10 +37,14 @@ void main() {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(
-          value: settingsProvider ?? SettingsProvider(),
+          value:
+              settingsProvider ??
+              SettingsProvider(createBusinessTestPreferences()),
         ),
         ChangeNotifierProvider.value(
-          value: assistantProvider ?? AssistantProvider(),
+          value:
+              assistantProvider ??
+              AssistantProvider(preferences: createBusinessTestPreferences()),
         ),
       ],
       child: MaterialApp(
@@ -177,7 +182,7 @@ void main() {
     final controller = TextEditingController(text: 'draw a cat');
     final focusNode = FocusNode();
     final mediaController = ChatInputBarController();
-    final settings = SettingsProvider();
+    final settings = SettingsProvider(createBusinessTestPreferences());
     await settings.setProviderConfig(
       'OpenAITest',
       ProviderConfig(
@@ -225,7 +230,7 @@ void main() {
   testWidgets('绘图模式关闭后切换对话会重新显示', (tester) async {
     final controller = TextEditingController(text: 'draw a cat');
     final focusNode = FocusNode();
-    final settings = SettingsProvider();
+    final settings = SettingsProvider(createBusinessTestPreferences());
     await settings.setProviderConfig(
       'OpenAITest',
       ProviderConfig(
@@ -496,6 +501,9 @@ void main() {
       ),
       findsNothing,
     );
+
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
 
     controller.dispose();
     focusNode.dispose();

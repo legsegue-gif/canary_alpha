@@ -1,7 +1,6 @@
 import 'dart:async';
-import 'dart:io' show File;
+import 'dart:io' show File, Platform;
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:provider/provider.dart';
 import '../../../l10n/app_localizations.dart';
@@ -63,6 +62,7 @@ import '../controllers/home_view_model.dart';
 import '../controllers/scroll_controller.dart' as scroll_ctrl;
 import 'home_mobile_layout.dart';
 import 'home_desktop_layout.dart';
+import 'package:Canary/theme/app_semantic_colors.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -181,8 +181,7 @@ class _CompressContextOptionsDialogState
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final cs = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final panelColor = isDark ? const Color(0xFF1C1C1E) : cs.surface;
+    final panelColor = cs.surfaceContainerHigh;
     final constrainedWidth = MediaQuery.of(
       context,
     ).size.width.clamp(0.0, 420.0).toDouble();
@@ -346,7 +345,7 @@ class _SegmentButton extends StatelessWidget {
     final selectedBg = isDark
         ? cs.primary.withValues(alpha: 0.22)
         : cs.primary.withValues(alpha: 0.12);
-    final baseBg = isDark ? Colors.white10 : const Color(0xFFF2F3F5);
+    final baseBg = context.appColors.surfaceFill;
 
     return IosCardPress(
       baseColor: selected ? selectedBg : baseBg,
@@ -385,10 +384,7 @@ class _DialogActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final base = primary
-        ? cs.primary
-        : (isDark ? Colors.white10 : const Color(0xFFF2F3F5));
+    final base = primary ? cs.primary : (context.appColors.surfaceFill);
 
     return IosCardPress(
       baseColor: base,
@@ -414,7 +410,7 @@ class _DialogActionButton extends StatelessWidget {
 }
 
 class _HomePageState extends State<HomePage>
-    with SingleTickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
+    with TickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
   // ============================================================================
   // UI Controllers (owned by State for lifecycle management)
   // ============================================================================
@@ -426,13 +422,15 @@ class _HomePageState extends State<HomePage>
   final FocusNode _inputFocus = FocusNode();
   final TextEditingController _inputController = TextEditingController();
   final ChatInputBarController _mediaController = ChatInputBarController();
-  final scroll_ctrl.ChatAutoFollowScrollController _scrollController =
+  scroll_ctrl.ChatAutoFollowScrollController _scrollController =
       scroll_ctrl.ChatAutoFollowScrollController();
+  String? _scrollConversationId;
   final BackdropKey _messageListBackdropKey = BackdropKey();
   final GlobalKey _inputBarKey = GlobalKey();
   final GlobalKey _selectionMiniMapKey = GlobalKey();
   final GlobalKey _selectionActionBarKey = GlobalKey();
   bool _scrollNavHovering = false;
+  double _lastViewInsetBottom = 0;
   StreamSubscription<String>? _processTextSub;
 
   // ============================================================================
@@ -470,6 +468,9 @@ class _HomePageState extends State<HomePage>
     _initProcessText();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _lastViewInsetBottom = View.of(context).viewInsets.bottom;
+      }
       _controller.measureInputBar();
       if (!mounted) return;
       context.read<WorldBookProvider>().initialize();
@@ -488,6 +489,16 @@ class _HomePageState extends State<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _controller.onAppLifecycleStateChanged(state);
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (!mounted) return;
+    final nextInset = View.of(context).viewInsets.bottom;
+    final keyboardOpening = nextInset > _lastViewInsetBottom + 0.5;
+    _lastViewInsetBottom = nextInset;
+    if (!keyboardOpening || !PlatformUtils.isMobileTarget) return;
+    _controller.scrollCtrl.pinBottomDuringViewportResizeIfNeeded();
   }
 
   @override
@@ -510,13 +521,22 @@ class _HomePageState extends State<HomePage>
     _drawerController.removeListener(_onDrawerValueChanged);
     _inputFocus.dispose();
     _inputController.dispose();
-    _scrollController.dispose();
     _controller.dispose();
+    _scrollController.dispose();
     routeObserver.unsubscribe(this);
     super.dispose();
   }
 
   void _onControllerChanged() {
+    final conversationId = _controller.currentConversation?.id;
+    if (conversationId != null && conversationId != _scrollConversationId) {
+      _scrollConversationId = conversationId;
+      final previous = _scrollController;
+      final replacement = scroll_ctrl.ChatAutoFollowScrollController();
+      _scrollController = replacement;
+      _controller.replaceScrollController(replacement);
+      WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+    }
     if (mounted) setState(() {});
   }
 
@@ -615,13 +635,7 @@ class _HomePageState extends State<HomePage>
     required String? modelDisplay,
     required ColorScheme cs,
   }) {
-    final collapsed = _controller.collapseVersions(_controller.messages);
-    final selectable = collapsed
-        .where((m) => m.role == 'user' || m.role == 'assistant')
-        .toList();
-    final allSelected =
-        selectable.isNotEmpty &&
-        selectable.every((m) => _controller.selectedItems.contains(m.id));
+    final allSelected = _controller.allSelectableMessagesSelected;
 
     return HomeMobileScaffold(
       scaffoldKey: _scaffoldKey,
@@ -712,20 +726,10 @@ class _HomePageState extends State<HomePage>
               ),
             ),
           );
-          final isAndroid =
-              Theme.of(context).platform == TargetPlatform.android;
-          Widget w = content;
-          if (!isAndroid) {
-            w = w
-                .animate(
-                  key: ValueKey(
-                    'mob_body_${_controller.currentConversation?.id ?? 'none'}',
-                  ),
-                )
-                .fadeIn(duration: 200.ms, curve: Curves.easeOutCubic);
-            w = FadeTransition(opacity: _controller.convoFade, child: w);
-          }
-          return w;
+          return FadeTransition(
+            opacity: _controller.convoFade,
+            child: _wrapMessageJumpTransition(content),
+          );
         },
       ),
       bottomOverlay: _controller.selecting
@@ -757,13 +761,7 @@ class _HomePageState extends State<HomePage>
   }) {
     _controller.initDesktopUi();
 
-    final collapsed = _controller.collapseVersions(_controller.messages);
-    final selectable = collapsed
-        .where((m) => m.role == 'user' || m.role == 'assistant')
-        .toList();
-    final allSelected =
-        selectable.isNotEmpty &&
-        selectable.every((m) => _controller.selectedItems.contains(m.id));
+    final allSelected = _controller.allSelectableMessagesSelected;
 
     return HomeDesktopScaffold(
       scaffoldKey: _scaffoldKey,
@@ -826,7 +824,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _openSelectionMiniMap() async {
-    final collapsed = _controller.allCollapsedMessagesForCurrentConversation();
+    final collapsed = await _controller
+        .loadAllCollapsedMessagesForCurrentConversation();
+    if (!mounted) return;
     if (collapsed.isEmpty) return;
 
     if (PlatformUtils.isDesktop &&
@@ -903,27 +903,22 @@ class _HomePageState extends State<HomePage>
       backgroundImageActive: backgroundImageActive,
       content: FadeTransition(
         opacity: _controller.convoFade,
-        child:
-            KeyedSubtree(
-                  key: ValueKey<String>(
-                    _controller.currentConversation?.id ?? 'none',
-                  ),
-                  child: _buildMessageListView(
-                    context,
-                    topContentPadding: topContentPadding,
-                    bottomContentPadding: bottomContentPadding,
-                    dividerPadding: const EdgeInsets.symmetric(
-                      vertical: 8,
-                      horizontal: 12,
-                    ),
-                  ),
-                )
-                .animate(
-                  key: ValueKey(
-                    'tab_body_${_controller.currentConversation?.id ?? 'none'}',
-                  ),
-                )
-                .fadeIn(duration: 200.ms, curve: Curves.easeOutCubic),
+        child: _wrapMessageJumpTransition(
+          KeyedSubtree(
+            key: ValueKey<String>(
+              _controller.currentConversation?.id ?? 'none',
+            ),
+            child: _buildMessageListView(
+              context,
+              topContentPadding: topContentPadding,
+              bottomContentPadding: bottomContentPadding,
+              dividerPadding: const EdgeInsets.symmetric(
+                vertical: 8,
+                horizontal: 12,
+              ),
+            ),
+          ),
+        ),
       ),
       bottomOverlay: _controller.selecting
           ? ConstrainedBox(
@@ -993,7 +988,7 @@ class _HomePageState extends State<HomePage>
                     image: provider,
                     fit: BoxFit.cover,
                     colorFilter: ColorFilter.mode(
-                      Colors.black.withValues(alpha: 0.04),
+                      cs.shadow.withValues(alpha: 0.04),
                       BlendMode.srcATop,
                     ),
                   ),
@@ -1089,23 +1084,6 @@ class _HomePageState extends State<HomePage>
     return kToolbarHeight + MediaQuery.paddingOf(context).top;
   }
 
-  /// Map persisted truncateIndex (raw message count) to collapsed index.
-  int _computeTruncCollapsedIndex() {
-    final int truncRaw = _controller.chatController.loadedWindowTruncateIndex();
-    if (truncRaw <= 0) return -1;
-    final rawMessages = _controller.messages;
-    final seen = <String>{};
-    final int limit = truncRaw < rawMessages.length
-        ? truncRaw
-        : rawMessages.length;
-    int count = 0;
-    for (int i = 0; i < limit; i++) {
-      final gid = (rawMessages[i].groupId ?? rawMessages[i].id);
-      if (seen.add(gid)) count++;
-    }
-    return count - 1;
-  }
-
   Widget _buildMessageListView(
     BuildContext context, {
     required double topContentPadding,
@@ -1124,16 +1102,17 @@ class _HomePageState extends State<HomePage>
     final suggestionsEnabled =
         settings.suggestionModelProvider != null &&
         settings.suggestionModelId != null;
+    final assistant = context.watch<AssistantProvider>().currentAssistant;
     return BackdropGroup(
       backdropKey: _messageListBackdropKey,
       child: MessageListView(
         isProcessingFiles: _controller.isProcessingFiles,
         scrollController: _scrollController,
-        observerController: _controller.scrollCtrl.observerController,
+        listController: _controller.scrollCtrl.messageListController,
         messages: _controller.chatController.collapsedMessages,
+        renderModels: _controller.chatController.messageRenderModels,
         byGroup: _controller.chatController.groupedMessages,
         versionSelections: _controller.versionSelections,
-        truncCollapsedIndex: _computeTruncCollapsedIndex(),
         reasoning: _controller.reasoning,
         reasoningSegments: _controller.reasoningSegments,
         contentSplits: _controller.contentSplits,
@@ -1151,10 +1130,28 @@ class _HomePageState extends State<HomePage>
         streamingContentNotifier: _controller.streamingContentNotifier,
         spotlightMessageId: _controller.spotlightMessageId,
         spotlightToken: _controller.spotlightToken,
+        removingSlotIds: _controller.removingSlotIds,
         hasMoreBefore: _controller.chatController.hasMoreBefore,
+        isLoadingWindow: _controller.isLoadingWindow,
         onLoadMoreBefore: _controller.loadMoreBefore,
         hasMoreAfter: _controller.chatController.hasMoreAfter,
         onLoadMoreAfter: _controller.loadMoreAfter,
+        onUserScrollIntent: _controller.scrollCtrl.handleUserScrollIntent,
+        chatFontScale: settings.chatFontScale,
+        collapseThinking: settings.autoCollapseThinking,
+        collapsedCodeLines: settings.autoCollapseCodeBlock
+            ? settings.autoCollapseCodeBlockLines
+            : null,
+        // Mirrors the wrap decision in the code block renderer.
+        wrapCodeBlocks:
+            Platform.isMacOS ||
+            Platform.isWindows ||
+            Platform.isLinux ||
+            settings.mobileCodeBlockWrap,
+        showModelIcon: settings.showModelIcon,
+        showUserAvatar: settings.showUserAvatar,
+        showTokenStats: settings.showTokenStats,
+        assistant: assistant,
         onVersionChange: (groupId, version) async {
           await _controller.setSelectedVersion(groupId, version);
         },
@@ -1171,7 +1168,9 @@ class _HomePageState extends State<HomePage>
           byGroup,
           deleteAllVersions: true,
         ),
-        onForkConversation: (message) => _controller.forkConversation(message),
+        onForkConversation: _controller.isTemporaryConversation
+            ? null
+            : (message) => _controller.forkConversation(message),
         onShareMessage: (index, messages) =>
             _controller.shareMessage(index, messages),
         onSelectMessages: (index, messages) =>
@@ -1346,7 +1345,7 @@ class _HomePageState extends State<HomePage>
                 }
               : null,
           bottomOffset: _controller.inputBarHeight + 12,
-          onScrollToTop: _controller.scrollToTop,
+          onScrollToTop: () => _controller.scrollToTop(animate: false),
           onPreviousMessage: _controller.jumpToPreviousQuestion,
           onNextMessage: _controller.jumpToNextQuestion,
           onScrollToBottom: _controller.forceScrollToBottom,
@@ -1377,7 +1376,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _openMiniMap() async {
-    final collapsed = _controller.allCollapsedMessagesForCurrentConversation();
+    final collapsed = await _controller
+        .loadAllCollapsedMessagesForCurrentConversation();
+    if (!mounted) return;
     if (collapsed.isEmpty) return;
 
     String? selectedId;
@@ -1392,8 +1393,15 @@ class _HomePageState extends State<HomePage>
     }
     if (!mounted) return;
     if (selectedId != null && selectedId.isNotEmpty) {
-      await _controller.scrollToMessageId(selectedId);
+      await _controller.scrollToMessageId(selectedId, useRikkaTransition: true);
     }
+  }
+
+  Widget _wrapMessageJumpTransition(Widget child) {
+    return FadeTransition(
+      opacity: _controller.messageJumpOpacity,
+      child: child,
+    );
   }
 
   Widget _wrapWithDropTarget(Widget child) {
@@ -1419,7 +1427,9 @@ class _HomePageState extends State<HomePage>
           if (_controller.isDragHovering)
             IgnorePointer(
               child: Container(
-                color: Colors.black.withValues(alpha: 0.12),
+                color: Theme.of(
+                  context,
+                ).colorScheme.scrim.withValues(alpha: 0.12),
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1698,7 +1708,7 @@ class _HomePageState extends State<HomePage>
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
               l10n.homePageDelete,
-              style: TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
         ],
@@ -1757,7 +1767,7 @@ class _HomePageState extends State<HomePage>
             onPressed: () => Navigator.of(ctx).pop(true),
             child: Text(
               l10n.homePageDelete,
-              style: TextStyle(color: Colors.red),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
         ],
