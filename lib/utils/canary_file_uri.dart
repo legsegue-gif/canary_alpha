@@ -106,7 +106,6 @@ final class CanaryFileUri {
   /// rejected — only exact whitelist entries count.
   static const Set<String> _knownBundleIds = {
     'app.canary.client',
-    'app.canary.client',
   };
 
   /// Windows AppData folder name (Flutter BINARY_NAME). Compared
