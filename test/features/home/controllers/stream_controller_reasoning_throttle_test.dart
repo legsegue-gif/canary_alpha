@@ -2,7 +2,6 @@ import "../../../support/business_test_harness.dart";
 import 'package:flutter_test/flutter_test.dart';
 import 'package:Canary/core/models/chat_message.dart';
 import 'package:Canary/core/providers/settings_provider.dart';
-import 'package:Canary/core/services/api/chat_api_service.dart';
 import 'package:Canary/core/services/chat/chat_service.dart';
 import 'package:Canary/features/home/controllers/stream_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -79,15 +78,7 @@ void main() {
       notifier.addListener(() => notifyCount++);
 
       for (var i = 0; i < 5; i++) {
-        await controller.handleReasoningChunk(
-          ChatStreamChunk(
-            content: '',
-            reasoning: '${i + 1}',
-            isDone: false,
-            totalTokens: 0,
-          ),
-          state,
-        );
+        await controller.handleReasoningChunk('${i + 1}', state);
       }
 
       expect(notifyCount, 0);
