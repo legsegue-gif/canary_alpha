@@ -24,6 +24,7 @@ import 'providers/stepfun_search_service.dart';
 import 'providers/firecrawl_search_service.dart';
 import 'providers/tinyfish_search_service.dart';
 import 'providers/doubao_search_service.dart';
+import 'providers/canary_search_service.dart';
 
 // Base interface for all search services
 abstract class SearchService<T extends SearchServiceOptions> {
@@ -98,6 +99,8 @@ abstract class SearchService<T extends SearchServiceOptions> {
         return TinyFishSearchService() as SearchService;
       case DoubaoOptions _:
         return DoubaoSearchService() as SearchService;
+      case CanaryOptions _:
+        return CanarySearchService() as SearchService;
       default:
         return BingSearchService() as SearchService;
     }
@@ -248,6 +251,8 @@ abstract class SearchServiceOptions {
         return TinyFishOptions.fromJson(json);
       case 'doubao':
         return DoubaoOptions.fromJson(json);
+      case 'canary':
+        return CanaryOptions.fromJson(json);
       default:
         return BingLocalOptions(id: json['id']);
     }
@@ -923,4 +928,16 @@ class DoubaoOptions extends SearchServiceOptions {
     apiKey: json['apiKey'] ?? '',
     extraApiKeys: SearchServiceOptions.parseExtraApiKeys(json),
   );
+}
+
+class CanaryOptions extends SearchServiceOptions {
+  static const String builtInId = 'canary';
+
+  CanaryOptions({required super.id});
+
+  @override
+  Map<String, dynamic> toJson() => {'type': 'canary', 'id': id};
+
+  factory CanaryOptions.fromJson(Map<String, dynamic> json) =>
+      CanaryOptions(id: json['id']);
 }
