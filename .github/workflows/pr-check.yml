@@ -54,9 +54,16 @@ jobs:
             HEAD_SHA="${{ github.sha }}"
           fi
 
-          files="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | grep -E '^(lib|test)/.*\\.dart$' || true)"
+          # 正则里是 \.dart$ 而不是 \\.dart$：YAML 块标量不处理反斜杠转义，
+          # shell 单引号里也原样，所以 ERE 会原封收到写下的内容。写成 \\.
+          # 就是「匹配一个字面反斜杠字符」，路径里不可能有，files 恒为空，
+          # 于是这道门禁一直静默 exit 0 —— 一个 3 万行的 PR 也报「没有改动
+          # 的 Dart 文件」。
+          files="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | grep -E '^(lib|test)/.*\.dart$' || true)"
           if [ -z "$files" ]; then
-            echo "No changed Dart files to format-check."
+            # 这里要能区分「真的没有 Dart 改动」和「筛选器又坏了」。
+            total="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | wc -l | tr -d ' ')"
+            echo "No changed Dart files to format-check. (本次改动共 $total 个文件)"
             exit 0
           fi
 
