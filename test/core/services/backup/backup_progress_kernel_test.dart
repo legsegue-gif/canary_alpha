@@ -600,9 +600,16 @@ void _nativeSleepIgnoringKill(BackupIsolateContext context, int seconds) {
         .call(seconds * 1000);
     return;
   }
-  DynamicLibrary.process()
-      .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep')
-      .call(seconds);
+  // POSIX sleep() 被信号打断时立即返回**剩余秒数**，不会自己续睡。
+  // 这个 helper 的用途正是模拟「isolate 卡在不可中断的 native 调用里」，
+  // 只调一次达不到目的：flutter_tester 在 Linux 上会周期性发信号，
+  // sleep(120) 因此 2ms 就返回，body 立刻跑完，超时根本不会发生。
+  final sleepFn = DynamicLibrary.process()
+      .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep');
+  var remaining = seconds;
+  while (remaining > 0) {
+    remaining = sleepFn(remaining);
+  }
 }
 
 void _stuckHeartbeatLoop(BackupIsolateContext context, String path) {

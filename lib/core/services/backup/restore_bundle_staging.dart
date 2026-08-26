@@ -1030,9 +1030,15 @@ final class RestoreBundleStaging {
           .call(seconds * 1000);
       return;
     }
-    DynamicLibrary.process()
-        .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep')
-        .call(seconds);
+    // POSIX sleep() 被信号打断时立即返回**剩余秒数**，不会自己续睡。
+    // 这里要的是「不可中断的 native 阻塞」，必须拿返回值循环重试 ——
+    // 只调一次的话，一个信号就能让它提前返回，阻塞语义随之失效。
+    final sleepFn = DynamicLibrary.process()
+        .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep');
+    var remaining = seconds;
+    while (remaining > 0) {
+      remaining = sleepFn(remaining);
+    }
   }
 
   static Map<String, Object?>? _parseBusinessEntityRowIds(
