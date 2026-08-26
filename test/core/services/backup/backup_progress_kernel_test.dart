@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:Canary/core/services/backup/backup_cancel_token.dart';
@@ -600,16 +601,40 @@ void _nativeSleepIgnoringKill(BackupIsolateContext context, int seconds) {
         .call(seconds * 1000);
     return;
   }
-  // POSIX sleep() 被信号打断时立即返回**剩余秒数**，不会自己续睡。
-  // 这个 helper 的用途正是模拟「isolate 卡在不可中断的 native 调用里」，
-  // 只调一次达不到目的：flutter_tester 在 Linux 上会周期性发信号，
-  // sleep(120) 因此 2ms 就返回，body 立刻跑完，超时根本不会发生。
-  final sleepFn = DynamicLibrary.process()
-      .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep');
-  var remaining = seconds;
-  while (remaining > 0) {
-    remaining = sleepFn(remaining);
+  // 这个 helper 要模拟「isolate 卡在不可中断的 native 调用里」，不能用
+  // POSIX sleep()：它是**秒粒度**的。flutter_tester 在 Linux 上约每 1ms
+  // 发一个信号，实测 sleep(3)→2→1→0 三轮各 0ms，一秒没睡就"睡完"了；
+  // 循环重试也救不了，每轮的损失都被向下取整抹掉。
+  // macOS 看不到这个问题 —— libSystem 自己吃掉了 EINTR。
+  //
+  // nanosleep() 用 timespec 以纳秒粒度回填剩余时间，可以精确续睡。
+  final nanosleep = DynamicLibrary.process()
+      .lookupFunction<
+        Int32 Function(Pointer<_Timespec>, Pointer<_Timespec>),
+        int Function(Pointer<_Timespec>, Pointer<_Timespec>)
+      >('nanosleep');
+  final req = calloc<_Timespec>();
+  final rem = calloc<_Timespec>();
+  try {
+    req.ref.tvSec = seconds;
+    req.ref.tvNsec = 0;
+    while (nanosleep(req, rem) != 0) {
+      req.ref.tvSec = rem.ref.tvSec;
+      req.ref.tvNsec = rem.ref.tvNsec;
+    }
+  } finally {
+    calloc.free(req);
+    calloc.free(rem);
   }
+}
+
+/// POSIX `struct timespec`，给 `nanosleep` 用。
+final class _Timespec extends Struct {
+  @Int64()
+  external int tvSec;
+
+  @Int64()
+  external int tvNsec;
 }
 
 void _stuckHeartbeatLoop(BackupIsolateContext context, String path) {

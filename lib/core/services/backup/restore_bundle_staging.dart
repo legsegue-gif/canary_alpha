@@ -6,6 +6,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
@@ -1030,14 +1031,30 @@ final class RestoreBundleStaging {
           .call(seconds * 1000);
       return;
     }
-    // POSIX sleep() 被信号打断时立即返回**剩余秒数**，不会自己续睡。
-    // 这里要的是「不可中断的 native 阻塞」，必须拿返回值循环重试 ——
-    // 只调一次的话，一个信号就能让它提前返回，阻塞语义随之失效。
-    final sleepFn = DynamicLibrary.process()
-        .lookupFunction<Int32 Function(Uint32), int Function(int)>('sleep');
-    var remaining = seconds;
-    while (remaining > 0) {
-      remaining = sleepFn(remaining);
+    // 不能用 POSIX sleep()：它是**秒粒度**的。被信号打断时返回值只按整秒
+    // 递减，实测 sleep(3)→2→1→0 三轮各耗时 0ms，一秒都没睡就"睡完"了。
+    // 循环重试也救不了，因为每轮的损失都被向下取整抹掉。
+    //
+    // nanosleep() 用 timespec 以纳秒粒度回填剩余时间，可以精确续睡。
+    // 这个 helper 要的正是「不可中断的 native 阻塞」，必须用它。
+    // （测出来的信号密度约 1ms 一个，睡 3 秒需要循环约 2950 次。）
+    final nanosleep = DynamicLibrary.process()
+        .lookupFunction<
+          Int32 Function(Pointer<_Timespec>, Pointer<_Timespec>),
+          int Function(Pointer<_Timespec>, Pointer<_Timespec>)
+        >('nanosleep');
+    final req = calloc<_Timespec>();
+    final rem = calloc<_Timespec>();
+    try {
+      req.ref.tvSec = seconds;
+      req.ref.tvNsec = 0;
+      while (nanosleep(req, rem) != 0) {
+        req.ref.tvSec = rem.ref.tvSec;
+        req.ref.tvNsec = rem.ref.tvNsec;
+      }
+    } finally {
+      calloc.free(req);
+      calloc.free(rem);
     }
   }
 
@@ -1327,4 +1344,15 @@ class _Sha256DigestSink implements Sink<Digest> {
 
   @override
   void close() {}
+}
+
+/// POSIX `struct timespec`，给 `nanosleep` 用。
+///
+/// 64 位 Linux 与 macOS 上 `time_t` 与 `tv_nsec` 都是 64 位有符号整数。
+final class _Timespec extends Struct {
+  @Int64()
+  external int tvSec;
+
+  @Int64()
+  external int tvNsec;
 }
