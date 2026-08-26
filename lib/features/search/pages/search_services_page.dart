@@ -488,7 +488,9 @@ class _SearchServicesPageState extends State<SearchServicesPage> {
                         ),
                       ),
                     ),
-                    if (s is! BingLocalOptions && statusText.isNotEmpty) ...[
+                    if (s is! BingLocalOptions &&
+                        s is! CanaryOptions &&
+                        statusText.isNotEmpty) ...[
                       const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -594,6 +596,7 @@ class _BrandBadge extends StatelessWidget {
     if (s is StepFunOptions) return 'stepfun';
     if (s is FirecrawlOptions) return 'firecrawl';
     if (s is TinyFishOptions) return 'tinyfish';
+    if (s is CanaryOptions) return 'canary';
     return 'search';
   }
 

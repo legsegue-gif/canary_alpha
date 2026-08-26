@@ -47,7 +47,7 @@ so they open without `xattr -dr com.apple.quarantine`.
 - 📤 **QR Code Sharing** - Export and import provider configurations via QR codes.
 - 💾 **Data Backup** - Supports chat history backup and restoration.
 - 🌐 **Custom Requests** - Supports custom HTTP request headers and bodies.
-- 🔡 **Custom Fonts** - Bring your own fonts (system fonts / Google Fonts).
+- 🔡 **Custom Fonts** - Bring your own fonts (system fonts / local fonts).
 - ⚙️ **Android Background Generation** - Keep chat generation running in the background (optional setting).
 
 ## 📱 Platform Support
