@@ -33,11 +33,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../theme/chat_bubble_style.dart';
+import 'frosted/frosted_surface.dart';
 import '../../../core/providers/model_provider.dart';
 import '../../../core/models/assistant_regex.dart';
 import '../../../shared/widgets/custom_bottom_sheet.dart';
 import '../../../shared/widgets/ios_checkbox.dart';
 import '../../../shared/widgets/ios_tactile.dart';
+import '../../../shared/widgets/thinking_sheen.dart';
 import '../../../desktop/desktop_context_menu.dart';
 import '../../../desktop/menu_anchor.dart';
 import '../../../shared/widgets/emoji_text.dart';
@@ -46,6 +48,8 @@ import '../../home/services/ask_user_interaction_service.dart';
 import '../../home/services/local_tools_service.dart';
 import '../../home/services/tool_approval_service.dart';
 import '../utils/thinking_tag_parser.dart';
+import 'timeline_projection.dart';
+import 'timeline_visibility.dart';
 import 'citation_sources_sheet.dart';
 import 'chat_suggestion_bubbles.dart';
 import 'token_display_widget.dart';
@@ -136,6 +140,10 @@ Uri? _tryNormalizeExternalUri(String raw) {
 @visibleForTesting
 (String, List<String>) parseMcpImagePathsForTesting(String? content) =>
     _parseMcpImagePaths(content);
+
+/// Incremented when a memoized tool-step builder actually runs.
+@visibleForTesting
+int debugTimelineToolStepBuilds = 0;
 
 String _resolveAttachmentImageUri(String uri) {
   final path = uri.trim();
@@ -248,6 +256,157 @@ Widget _buildResolvedImage(
     height: height,
     fit: fit,
     errorBuilder: (_, __, ___) => errorWidget(),
+  );
+}
+
+ImageProvider? _assistantInlineImageProvider(String src) {
+  if (src.startsWith('http://') || src.startsWith('https://')) {
+    return NetworkImage(src);
+  }
+  if (src.startsWith('data:')) {
+    final bytes = _decodeDataUriBytes(src);
+    if (bytes == null) return null;
+    return MemoryImage(bytes);
+  }
+  final fixed = SandboxPathResolver.fix(src);
+  if (File(fixed).existsSync()) return FileImage(File(fixed));
+  return null;
+}
+
+class _AssistantInlineImage extends StatefulWidget {
+  const _AssistantInlineImage({
+    required this.uri,
+    required this.imageKey,
+    required this.group,
+    required this.initialIndex,
+    this.onAspectResolved,
+  });
+
+  final String uri;
+  final String imageKey;
+  final List<String> group;
+  final int initialIndex;
+  final void Function(String imageKey, double aspectRatio)? onAspectResolved;
+
+  @override
+  State<_AssistantInlineImage> createState() => _AssistantInlineImageState();
+}
+
+class _AssistantInlineImageState extends State<_AssistantInlineImage> {
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+  String? _listenedIdentity;
+
+  @override
+  void dispose() {
+    _stopListening();
+    super.dispose();
+  }
+
+  void _stopListening() {
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
+    _stream = null;
+    _listener = null;
+    _listenedIdentity = null;
+  }
+
+  void _listenForAspect(ImageProvider provider) {
+    final identity = '${widget.imageKey}:${widget.uri.length}';
+    if (_listenedIdentity == identity) return;
+    _stopListening();
+    _listenedIdentity = identity;
+    final stream = provider.resolve(ImageConfiguration.empty);
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener((info, _) {
+      final width = info.image.width;
+      final height = info.image.height;
+      if (width > 0 && height > 0) {
+        widget.onAspectResolved?.call(widget.imageKey, width / height);
+      }
+    });
+    _stream = stream;
+    _listener = listener;
+    stream.addListener(listener);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _assistantInlineImageProvider(widget.uri);
+    return GestureDetector(
+      key: ValueKey('assistant-inline-image:${widget.imageKey}'),
+      onTap: widget.group.isEmpty
+          ? null
+          : () => _openAssistantImageViewer(
+              context,
+              images: widget.group,
+              initialIndex: widget.initialIndex.clamp(
+                0,
+                widget.group.length - 1,
+              ),
+            ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final displayWidth = constraints.maxWidth;
+          final dpr = MediaQuery.devicePixelRatioOf(context);
+          final cacheWidth = displayWidth.isFinite
+              ? math.max(1, (displayWidth * dpr).ceil())
+              : null;
+          final image = provider == null
+              ? const Icon(Icons.broken_image)
+              : Image(
+                  image: ResizeImage.resizeIfNeeded(cacheWidth, null, provider),
+                  width: displayWidth.isFinite ? displayWidth : null,
+                  fit: BoxFit.contain,
+                  frameBuilder: (context, child, frame, _) {
+                    if (frame != null) {
+                      _listenForAspect(provider);
+                    }
+                    return child;
+                  },
+                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                );
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: image,
+          );
+        },
+      ),
+    );
+  }
+}
+
+void _openAssistantImageViewer(
+  BuildContext context, {
+  required List<String> images,
+  required int initialIndex,
+}) {
+  Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      opaque: false,
+      pageBuilder: (_, __, ___) =>
+          ImageViewerPage(images: images, initialIndex: initialIndex),
+      transitionDuration: const Duration(milliseconds: 360),
+      reverseTransitionDuration: const Duration(milliseconds: 280),
+      transitionsBuilder: (context, anim, sec, child) {
+        final curved = CurvedAnimation(
+          parent: anim,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.02),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    ),
   );
 }
 
@@ -819,6 +978,13 @@ class ChatMessageWidget extends StatefulWidget {
   final Future<void> Function(ToolUIPart part, AskUserResult result)?
   onRecoveredAskUserAnswer;
 
+  /// When null, follows [SettingsProvider.showThinkingCards].
+  final bool? showThinkingCards;
+
+  /// When null, follows [SettingsProvider.showToolCards].
+  final bool? showToolCards;
+  final void Function(String imageKey, double aspectRatio)? onInlineImageAspect;
+
   const ChatMessageWidget({
     super.key,
     required this.message,
@@ -861,6 +1027,9 @@ class ChatMessageWidget extends StatefulWidget {
     this.suggestions = const <String>[],
     this.onSuggestionTap,
     this.onRecoveredAskUserAnswer,
+    this.showThinkingCards,
+    this.showToolCards,
+    this.onInlineImageAspect,
   });
 
   @override
@@ -893,6 +1062,9 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
   // the content changes every frame anyway.
   final Map<String, String> _visualRegexMemo = <String, String>{};
   String _visualRegexMemoSignature = '';
+  // Search-result extraction is keyed by tool-part list identity.
+  List<ToolUIPart>? _searchItemsParts;
+  List<Map<String, dynamic>>? _searchItemsCache;
 
   @override
   void initState() {
@@ -1438,11 +1610,23 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
       content: result,
       loading: false,
     );
+    if (!_shouldShowToolCard(
+      context,
+      part,
+      showToolCards: widget.showToolCards,
+      conversationId: widget.message.conversationId,
+    )) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: _ToolCallItem(
-        part: part,
-        onRecoveredAnswer: widget.onRecoveredAskUserAnswer,
+      child: _RecoveredAskUserAction(
+        conversationId: widget.message.conversationId,
+        onSubmit: widget.onRecoveredAskUserAnswer,
+        child: _ToolCallItem(
+          part: part,
+          conversationId: widget.message.conversationId,
+        ),
       ),
     );
   }
@@ -1802,7 +1986,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         style: TextStyle(
           fontSize: baseUser,
           height: 1.4,
-          color: _chatSurfacePlainTextColor(context),
+          color: _chatSurfacePlainTextColor(context, isUser: true),
         ),
       );
     }
@@ -2139,6 +2323,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
                 : cs.primary.withValues(alpha: 0.08))
           : null,
       bareOnDefault: !isUser,
+      isUser: isUser,
       child: child,
     );
   }
@@ -2154,7 +2339,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
   Widget _buildAssistantTextContent(
     BuildContext context,
     String visualContent,
-    SettingsProvider settings,
+    bool enableAssistantMarkdown,
     Map<String, String> citationIndexLookup,
   ) {
     final bool isDesktop =
@@ -2164,7 +2349,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     final double baseAssistant = isDesktop ? 14.0 : 15.7;
 
     Widget assistantContent;
-    if (settings.enableAssistantMarkdown) {
+    if (enableAssistantMarkdown) {
       assistantContent = MarkdownWithCodeHighlight(
         text: visualContent,
         onCitationTap: (id) => _handleCitationTap(id),
@@ -2211,7 +2396,7 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
   Widget _buildAssistantTextBlock(
     BuildContext context,
     String visualContent,
-    SettingsProvider settings,
+    bool enableAssistantMarkdown,
     Map<String, String> citationIndexLookup,
   ) {
     return SizedBox(
@@ -2221,296 +2406,131 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         child: _buildAssistantTextContent(
           context,
           visualContent,
-          settings,
+          enableAssistantMarkdown,
           citationIndexLookup,
         ),
       ),
     );
   }
 
-  List<_TimelineStepData> _buildTimelineSteps(
-    List<ToolUIPart> visibleTools, {
-    List<ReasoningSegment>? reasoningSegments,
+  Widget _buildAssistantImageBlock(
+    BuildContext context,
+    String uri, {
+    required String imageKey,
+    required List<String> group,
   }) {
-    final segments =
-        reasoningSegments ??
-        widget.reasoningSegments ??
-        const <ReasoningSegment>[];
-    if (segments.isEmpty) {
-      int toolCount = 0;
-      return visibleTools
-          .map(
-            (tool) => _TimelineStepData.tool(
-              tool: tool,
-              reasoningCountAfter: 0,
-              toolCountAfter: ++toolCount,
-            ),
-          )
-          .toList();
-    }
-
-    final steps = <_TimelineStepData>[];
-    int reasoningCount = 0;
-    int toolCount = 0;
-    int toolIndex = 0;
-
-    for (int i = 0; i < segments.length; i++) {
-      final segment = segments[i];
-      final int segmentToolStart = segment.toolStartIndex.clamp(
-        0,
-        visibleTools.length,
-      );
-      while (toolIndex < segmentToolStart && toolIndex < visibleTools.length) {
-        steps.add(
-          _TimelineStepData.tool(
-            tool: visibleTools[toolIndex],
-            reasoningCountAfter: reasoningCount,
-            toolCountAfter: ++toolCount,
-          ),
-        );
-        toolIndex++;
-      }
-
-      if (segment.text.isNotEmpty) {
-        steps.add(
-          _TimelineStepData.reasoning(
-            reasoning: segment,
-            reasoningCountAfter: ++reasoningCount,
-            toolCountAfter: toolCount,
-          ),
-        );
-      }
-
-      final int nextToolBoundary = i < segments.length - 1
-          ? segments[i + 1].toolStartIndex.clamp(0, visibleTools.length)
-          : visibleTools.length;
-      while (toolIndex < nextToolBoundary && toolIndex < visibleTools.length) {
-        steps.add(
-          _TimelineStepData.tool(
-            tool: visibleTools[toolIndex],
-            reasoningCountAfter: reasoningCount,
-            toolCountAfter: ++toolCount,
-          ),
-        );
-        toolIndex++;
-      }
-    }
-
-    while (toolIndex < visibleTools.length) {
-      steps.add(
-        _TimelineStepData.tool(
-          tool: visibleTools[toolIndex],
-          reasoningCountAfter: reasoningCount,
-          toolCountAfter: ++toolCount,
+    final resolved = _resolveAttachmentImageUri(uri);
+    final index = group.indexOf(resolved);
+    return SizedBox(
+      width: double.infinity,
+      child: _buildAssistantBubbleContainer(
+        context: context,
+        child: _AssistantInlineImage(
+          uri: resolved,
+          imageKey: imageKey,
+          group: group,
+          initialIndex: index >= 0 ? index : 0,
+          onAspectResolved: widget.onInlineImageAspect,
         ),
-      );
-      toolIndex++;
-    }
-
-    return steps;
+      ),
+    );
   }
 
-  bool get _hasUsableContentSplits => contentSplitsAreUsable(
-    widget.contentSplitOffsets,
-    widget.reasoningCountAtSplit,
-    widget.toolCountAtSplit,
-  );
-
-  bool get _hasStructuredAssistantParts => renderAssistantFromParts(
-    parts: widget.message.parts,
-    hasContentSplits: false,
-  );
-
-  bool _shouldRenderAssistantFromParts(
+  TimelineProjection _projectAssistantTimeline(
     String visualContent, {
     List<ReasoningSegment>? reasoningSegments,
   }) {
-    if (renderAssistantFromParts(
-      parts: widget.message.parts,
-      hasContentSplits: _hasUsableContentSplits,
-    )) {
-      return true;
-    }
-    if (!_hasStructuredAssistantParts) return false;
-    final visibleTools = (widget.toolParts ?? const <ToolUIPart>[])
-        .where((p) => p.toolName != 'builtin_search')
-        .toList();
-    final steps = _buildTimelineSteps(
-      visibleTools,
-      reasoningSegments: reasoningSegments,
-    );
-    return !_contentSplitsMatchSteps(steps, visualContent);
-  }
-
-  List<_RenderBlock> _buildRenderBlocksFromParts(
-    List<MessagePart> parts, {
-    List<ReasoningSegment>? reasoningSegments,
-  }) {
-    final liveTools = <String, ToolUIPart>{
-      for (final tool in widget.toolParts ?? const <ToolUIPart>[])
-        if (tool.toolName != 'builtin_search' && tool.id.isNotEmpty)
-          tool.id: tool,
-    };
-    final blocks = <_RenderBlock>[];
-    var pendingSteps = <_TimelineStepData>[];
-    var reasoningCount = 0;
-    var toolCount = 0;
-    var reasoningIndex = 0;
     final assistant = _assistantForMessage();
-
-    void flushSteps() {
-      if (pendingSteps.isEmpty) return;
-      blocks.add(
-        _RenderBlock.thinking(List<_TimelineStepData>.of(pendingSteps)),
-      );
-      pendingSteps = <_TimelineStepData>[];
-    }
-
-    for (final part in parts) {
-      switch (part) {
-        case TextPart(:final text):
-          final visual = _applyVisualAssistantRegexes(
-            text,
-            assistant: assistant,
-            scope: AssistantRegexScope.assistant,
-          );
-          if (visual.trim().isEmpty) continue;
-          flushSteps();
-          blocks.add(_RenderBlock.text(visual));
-        case ImagePart(:final uri):
-          if (!shouldInlineImagePart(part)) continue;
-          flushSteps();
-          blocks.add(_RenderBlock.text('\n\n![image]($uri)'));
-        case ReasoningPart(:final text):
-          if (text.isEmpty) continue;
-          final provided =
-              reasoningSegments != null &&
-                  reasoningIndex < reasoningSegments.length
-              ? reasoningSegments[reasoningIndex]
-              : null;
-          reasoningIndex++;
-          pendingSteps.add(
-            _TimelineStepData.reasoning(
-              reasoning: ReasoningSegment(
-                text: text,
-                expanded: provided?.expanded ?? true,
-                loading: provided?.loading ?? false,
-                startAt: provided?.startAt,
-                finishedAt: provided?.finishedAt,
-                onToggle: provided?.onToggle,
-                toolStartIndex: provided?.toolStartIndex ?? toolCount,
-              ),
-              reasoningCountAfter: ++reasoningCount,
-              toolCountAfter: toolCount,
-            ),
-          );
-        case ToolCallPart(:final payloadJson):
-          final parsed = toolUiFromPayload(
-            payloadJson,
-            fallbackOrdinal: toolCount,
-          );
-          if (parsed == null || parsed.toolName == 'builtin_search') continue;
-          pendingSteps.add(
-            _TimelineStepData.tool(
-              tool: liveTools[parsed.id] ?? parsed,
-              reasoningCountAfter: reasoningCount,
-              toolCountAfter: ++toolCount,
-            ),
-          );
-        default:
-          break;
-      }
-    }
-    flushSteps();
-    return blocks;
+    return projectAssistantTimeline(
+      parts: widget.message.parts,
+      liveTools: [
+        for (var i = 0; i < (widget.toolParts?.length ?? 0); i++)
+          TimelineToolRef(
+            providerId: widget.toolParts![i].id,
+            fallbackOrdinal: i,
+            toolName: widget.toolParts![i].toolName,
+            arguments: widget.toolParts![i].arguments,
+            content: widget.toolParts![i].content,
+            loading: widget.toolParts![i].loading,
+            memoToken: identityHashCode(widget.toolParts![i]),
+          ),
+      ],
+      reasoningSegments: [
+        for (final segment in reasoningSegments ?? const <ReasoningSegment>[])
+          TimelineReasoningRef(
+            text: segment.text,
+            expanded: segment.expanded,
+            loading: segment.loading,
+            startAt: segment.startAt,
+            finishedAt: segment.finishedAt,
+            toolStartIndex: segment.toolStartIndex,
+          ),
+      ],
+      visualContent: visualContent,
+      contentSplitOffsets: widget.contentSplitOffsets,
+      reasoningCountAtSplit: widget.reasoningCountAtSplit,
+      toolCountAtSplit: widget.toolCountAtSplit,
+      transformText: (text) => _applyVisualAssistantRegexes(
+        text,
+        assistant: assistant,
+        scope: AssistantRegexScope.assistant,
+      ),
+      partsArrivalOrdered: widget.message.isStreaming,
+    );
   }
 
-  List<_RenderBlock> _buildRenderBlocks(
-    String visualContent, {
+  VoidCallback? _projectedReasoningToggle(
+    int? overlayIndex,
     List<ReasoningSegment>? reasoningSegments,
-  }) {
-    if (_shouldRenderAssistantFromParts(
-      visualContent,
-      reasoningSegments: reasoningSegments,
-    )) {
-      return _buildRenderBlocksFromParts(
-        widget.message.parts,
-        reasoningSegments: reasoningSegments,
-      );
+  ) {
+    if (overlayIndex == null ||
+        reasoningSegments == null ||
+        overlayIndex < 0 ||
+        overlayIndex >= reasoningSegments.length) {
+      return null;
     }
-    final visibleTools = (widget.toolParts ?? const <ToolUIPart>[])
-        .where((p) => p.toolName != 'builtin_search')
-        .toList();
-    final steps = _buildTimelineSteps(
-      visibleTools,
-      reasoningSegments: reasoningSegments,
-    );
-    if (steps.isEmpty) {
-      return visualContent.trim().isEmpty
-          ? const <_RenderBlock>[]
-          : <_RenderBlock>[_RenderBlock.text(visualContent)];
-    }
-
-    if (!_contentSplitsMatchSteps(steps, visualContent)) {
-      final blocks = <_RenderBlock>[_RenderBlock.thinking(steps)];
-      if (visualContent.trim().isNotEmpty) {
-        blocks.add(_RenderBlock.text(visualContent));
-      }
-      return blocks;
-    }
-
-    final offsets = widget.contentSplitOffsets!;
-    final reasoningCounts = widget.reasoningCountAtSplit!;
-    final toolCounts = widget.toolCountAtSplit!;
-    final blocks = <_RenderBlock>[];
-    int stepIndex = 0;
-    int textStart = 0;
-
-    for (int i = 0; i < offsets.length; i++) {
-      final int safeOffset = offsets[i].clamp(0, visualContent.length);
-      final textSlice = visualContent.substring(textStart, safeOffset);
-      if (textSlice.trim().isNotEmpty) {
-        blocks.add(_RenderBlock.text(textSlice.trim()));
-      }
-
-      final targetReasoning = reasoningCounts[i];
-      final targetTool = toolCounts[i];
-      final blockSteps = <_TimelineStepData>[];
-      while (stepIndex < steps.length) {
-        final step = steps[stepIndex];
-        blockSteps.add(step);
-        stepIndex++;
-        if (step.reasoningCountAfter == targetReasoning &&
-            step.toolCountAfter == targetTool) {
-          break;
-        }
-      }
-      if (blockSteps.isNotEmpty) {
-        blocks.add(_RenderBlock.thinking(blockSteps));
-      }
-      textStart = safeOffset;
-    }
-
-    final trailingText = visualContent.substring(textStart);
-    if (trailingText.trim().isNotEmpty) {
-      blocks.add(_RenderBlock.text(trailingText.trim()));
-    }
-    return blocks;
+    return reasoningSegments[overlayIndex].onToggle;
   }
 
-  bool _contentSplitsMatchSteps(
-    List<_TimelineStepData> steps,
-    String visualContent,
+  List<_TimelineStepData> _timelineStepsFromProjected(
+    List<TimelineProjectedStep> steps,
+    List<ReasoningSegment>? reasoningSegments,
   ) {
-    if (!_hasUsableContentSplits) return false;
-    return contentSplitsMatchTimeline(
-      offsets: widget.contentSplitOffsets!,
-      reasoningCounts: widget.reasoningCountAtSplit!,
-      toolCounts: widget.toolCountAtSplit!,
-      contentLength: visualContent.length,
-      stepReasoningCounts: [for (final step in steps) step.reasoningCountAfter],
-      stepToolCounts: [for (final step in steps) step.toolCountAfter],
-    );
+    return [
+      for (final step in steps)
+        if (step.isReasoning)
+          _TimelineStepData.reasoning(
+            reasoning: ReasoningSegment(
+              text: step.reasoning!.text,
+              expanded: step.reasoning!.expanded,
+              loading: step.reasoning!.loading,
+              startAt: step.reasoning!.startAt,
+              finishedAt: step.reasoning!.finishedAt,
+              onToggle: _projectedReasoningToggle(
+                step.reasoningOverlayIndex,
+                reasoningSegments,
+              ),
+              toolStartIndex: step.reasoning!.toolStartIndex,
+            ),
+            reasoningCountAfter: step.reasoningCountAfter,
+            toolCountAfter: step.toolCountAfter,
+            sourceOrdinal: step.sourceOrdinal,
+          )
+        else
+          _TimelineStepData.tool(
+            tool: ToolUIPart(
+              id: step.tool!.providerId,
+              toolName: step.tool!.toolName,
+              arguments: step.tool!.arguments,
+              content: step.tool!.content,
+              loading: step.tool!.loading,
+              memoToken: step.tool!.memoToken,
+            ),
+            reasoningCountAfter: step.reasoningCountAfter,
+            toolCountAfter: step.toolCountAfter,
+            sourceOrdinal: step.sourceOrdinal,
+          ),
+    ];
   }
 
   List<ReasoningSegment>? _effectiveReasoningSegments(
@@ -2529,9 +2549,11 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     final effectiveExpanded = usingInlineThink
         ? (_inlineThinkExpanded ?? true)
         : widget.reasoningExpanded;
-    final effectiveLoading = usingInlineThink
-        ? false
-        : (widget.reasoningFinishedAt == null);
+    final effectiveLoading = timelineReasoningLoading(
+      finishedAt: widget.reasoningFinishedAt,
+      isStreaming: widget.message.isStreaming,
+      usingInlineThink: usingInlineThink,
+    );
 
     final provided = widget.reasoningSegments;
     if (provided != null && provided.isNotEmpty) return provided;
@@ -2557,9 +2579,26 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
 
   Widget _buildAssistantMessage() {
     final cs = Theme.of(context).colorScheme;
-    final fg = _chatSurfaceForegroundPalette(context);
+    final fg = _computeChatSurfaceForegroundPalette(context);
     final l10n = AppLocalizations.of(context)!;
-    final settings = context.watch<SettingsProvider>();
+    final showModelName = context.select<SettingsProvider, bool>(
+      (s) => s.showModelName,
+    );
+    final showModelTimestamp = context.select<SettingsProvider, bool>(
+      (s) => s.showModelTimestamp,
+    );
+    final enableAssistantMarkdown = context.select<SettingsProvider, bool>(
+      (s) => s.enableAssistantMarkdown,
+    );
+    final showThinkingCardsSetting = context.select<SettingsProvider, bool>(
+      (s) => s.showThinkingCards,
+    );
+    final showToolCardsSetting = context.select<SettingsProvider, bool>(
+      (s) => s.showToolCards,
+    );
+    final modelDisplayName = context.select<SettingsProvider, String>(
+      _resolveModelDisplayName,
+    );
     final assistant = _assistantForMessage();
 
     final parsedInlineThinking = _legacyInlineThinkingFor(widget);
@@ -2588,13 +2627,13 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
     final effectiveReasoningSegments = _effectiveReasoningSegments(
       extractedThinking,
     );
-    final renderFromParts = _shouldRenderAssistantFromParts(
+    final timelineProjection = _projectAssistantTimeline(
       visualContent,
       reasoningSegments: effectiveReasoningSegments,
     );
     final mediaPreview = _buildAttachmentPreview(
       context,
-      parts: renderFromParts
+      parts: timelineProjection.fromParts
           ? [
               for (final part in widget.message.parts)
                 if (part is FilePart) part,
@@ -2604,540 +2643,620 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
       alignEnd: false,
     );
 
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header: Model info and time
-          Row(
-            children: [
-              if (widget.useAssistantAvatar) ...[
-                _buildAssistantAvatar(cs),
-                const SizedBox(width: 8),
-              ] else if (widget.showModelIcon) ...[
-                widget.modelIcon ??
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: cs.secondary.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
+    return _ChatSurfaceTheme(
+      palette: fg,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header: Model info and time
+            Row(
+              children: [
+                if (widget.useAssistantAvatar) ...[
+                  _buildAssistantAvatar(cs),
+                  const SizedBox(width: 8),
+                ] else if (widget.showModelIcon) ...[
+                  widget.modelIcon ??
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: cs.secondary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Lucide.Bot, size: 18, color: cs.secondary),
                       ),
-                      child: Icon(Lucide.Bot, size: 18, color: cs.secondary),
-                    ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (showModelName)
+                        Text(
+                          widget.useAssistantName
+                              ? (widget.assistantName?.trim().isNotEmpty == true
+                                    ? widget.assistantName!.trim()
+                                    : _assistantNameFallback())
+                              : modelDisplayName,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: AppFontWeights.medium,
+                            color: cs.onSurface.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      Builder(
+                        builder: (context) {
+                          final List<Widget> rowChildren = [];
+                          if (showModelTimestamp) {
+                            rowChildren.add(
+                              Text(
+                                _dateFormat.format(widget.message.timestamp),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: cs.onSurface.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            );
+                          }
+                          // Token stats moved to action toolbar
+                          return rowChildren.isNotEmpty
+                              ? Row(children: rowChildren)
+                              : const SizedBox.shrink();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ],
-              Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (settings.showModelName)
-                      Text(
-                        widget.useAssistantName
-                            ? (widget.assistantName?.trim().isNotEmpty == true
-                                  ? widget.assistantName!.trim()
-                                  : _assistantNameFallback())
-                            : _resolveModelDisplayName(settings),
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: AppFontWeights.medium,
-                          color: cs.onSurface.withValues(alpha: 0.7),
+            ),
+            const SizedBox(height: 8),
+
+            if (mediaPreview != null) ...[
+              mediaPreview,
+              const SizedBox(height: 8),
+            ],
+
+            // File Processing Indicator (inserted before content)
+            if (widget.isProcessingFiles) ...[
+              const FileProcessingIndicator(),
+              const SizedBox(height: 8),
+            ],
+            ...() {
+              final showThinkingCards =
+                  widget.showThinkingCards ?? showThinkingCardsSetting;
+              final showToolCards =
+                  widget.showToolCards ?? showToolCardsSetting;
+              ToolApprovalService? approval;
+              try {
+                approval = context.read<ToolApprovalService>();
+                context.select<ToolApprovalService, int>(
+                  (service) => Object.hashAll([
+                    for (final req in service.pendingRequests)
+                      Object.hash(req.toolCallId, req.conversationId),
+                  ]),
+                );
+              } catch (_) {}
+              bool isPending(TimelineToolRef tool) =>
+                  approval?.pendingFor(
+                    toolCallId: tool.providerId,
+                    conversationId: widget.message.conversationId,
+                  ) !=
+                  null;
+              final visibleBlocks = visibleAssistantTimeline(
+                timelineProjection,
+                showThinkingCards: showThinkingCards,
+                showToolCards: showToolCards,
+                isPendingApproval: isPending,
+              );
+              if (visibleBlocks.isEmpty &&
+                  widget.message.isStreaming &&
+                  visualContent.isEmpty) {
+                return <Widget>[
+                  SizedBox(
+                    width: double.infinity,
+                    child: _buildAssistantBubbleContainer(
+                      context: context,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Semantics(
+                          label: l10n.chatMessageWidgetThinking,
+                          child: widget.hideStreamingIndicator
+                              ? const SizedBox(height: 16)
+                              : const LoadingIndicator(),
                         ),
                       ),
-                    Builder(
-                      builder: (context) {
-                        final List<Widget> rowChildren = [];
-                        if (settings.showModelTimestamp) {
-                          rowChildren.add(
-                            Text(
-                              _dateFormat.format(widget.message.timestamp),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: cs.onSurface.withValues(alpha: 0.5),
-                              ),
-                            ),
-                          );
-                        }
-                        // Token stats moved to action toolbar
-                        return rowChildren.isNotEmpty
-                            ? Row(children: rowChildren)
-                            : const SizedBox.shrink();
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          if (mediaPreview != null) ...[
-            mediaPreview,
-            const SizedBox(height: 8),
-          ],
-
-          // File Processing Indicator (inserted before content)
-          if (widget.isProcessingFiles) ...[
-            const FileProcessingIndicator(),
-            const SizedBox(height: 8),
-          ],
-          ...() {
-            final renderBlocks = _buildRenderBlocks(
-              visualContent,
-              reasoningSegments: effectiveReasoningSegments,
-            );
-            if (renderBlocks.isEmpty &&
-                widget.message.isStreaming &&
-                visualContent.isEmpty) {
-              return <Widget>[
-                SizedBox(
-                  width: double.infinity,
-                  child: _buildAssistantBubbleContainer(
-                    context: context,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Semantics(
-                        label: l10n.chatMessageWidgetThinking,
-                        child: widget.hideStreamingIndicator
-                            ? const SizedBox(height: 16)
-                            : const LoadingIndicator(),
-                      ),
                     ),
                   ),
-                ),
-              ];
-            }
-
-            final widgets = <Widget>[];
-            for (int i = 0; i < renderBlocks.length; i++) {
-              final block = renderBlocks[i];
-              if (block.type == _RenderBlockType.text && block.text != null) {
-                widgets.add(
+                ];
+              }
+              // Projector omits trim-empty visualContent. Newline-only history
+              // still has to occupy body height so a short scroll from the
+              // bottom does not evict the last streaming bubble.
+              if (visibleBlocks.isEmpty && visualContent.isNotEmpty) {
+                return <Widget>[
                   _buildAssistantTextBlock(
                     context,
-                    block.text!,
-                    settings,
+                    visualContent,
+                    enableAssistantMarkdown,
                     citationIndexLookup,
                   ),
-                );
-              } else if (block.steps.isNotEmpty) {
-                widgets.add(
+                  if (widget.message.isStreaming && visualContent.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 4),
+                      child: widget.hideStreamingIndicator
+                          ? const SizedBox(height: 16)
+                          : const LoadingIndicator(),
+                    ),
+                ];
+              }
+
+              final widgets = <Widget>[];
+              void addVisible(Widget child) {
+                if (widgets.isNotEmpty) {
+                  widgets.add(const SizedBox(height: 8));
+                }
+                widgets.add(child);
+              }
+
+              final imageGroup = <String>[
+                for (final block in visibleBlocks)
+                  if (block.isImage)
+                    _resolveAttachmentImageUri(block.imageUri!),
+              ];
+
+              for (final block in visibleBlocks) {
+                if (block.isImage) {
+                  addVisible(
+                    _buildAssistantImageBlock(
+                      context,
+                      block.imageUri!,
+                      imageKey:
+                          block.imageKey ??
+                          timelineImageBlockKey(sourceOrdinal: 0),
+                      group: imageGroup,
+                    ),
+                  );
+                  continue;
+                }
+                if (block.isText) {
+                  addVisible(
+                    _buildAssistantTextBlock(
+                      context,
+                      block.text!,
+                      enableAssistantMarkdown,
+                      citationIndexLookup,
+                    ),
+                  );
+                  continue;
+                }
+                if (!block.isThinking) continue;
+                addVisible(
                   _ChainOfThoughtCard(
-                    steps: block.steps,
+                    steps: _timelineStepsFromProjected(
+                      block.thinkingSteps,
+                      effectiveReasoningSegments,
+                    ),
+                    conversationId: widget.message.conversationId,
+                    showThinkingCards: showThinkingCards,
+                    showToolCards: showToolCards,
                     onRecoveredAnswer: widget.onRecoveredAskUserAnswer,
                   ),
                 );
               }
-              if (i != renderBlocks.length - 1) {
-                widgets.add(const SizedBox(height: 8));
-              }
-            }
 
-            if (widget.message.isStreaming && visualContent.isNotEmpty) {
-              widgets.add(
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, top: 4),
-                  child: widget.hideStreamingIndicator
-                      ? const SizedBox(height: 16)
-                      : const LoadingIndicator(),
-                ),
-              );
-            }
-            return widgets;
-          }(),
-          if (hasTranslation) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: _buildSharedChatSurface(
-                context,
-                borderRadius: BorderRadius.circular(16),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                defaultColor: cs.primaryContainer.withValues(
-                  alpha: Theme.of(context).brightness == Brightness.dark
-                      ? 0.25
-                      : 0.30,
-                ),
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 300),
-                  curve: const Cubic(0.2, 0.8, 0.2, 1),
-                  alignment: Alignment.topCenter,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      IosCardPress(
-                        onTap: widget.onToggleTranslation,
-                        borderRadius: BorderRadius.circular(12),
-                        baseColor: Colors.transparent,
-                        pressedBlendStrength: 0.12,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Lucide.Languages, size: 16, color: fg.strong),
-                            const SizedBox(width: 6),
-                            Text(
-                              l10n.chatMessageWidgetTranslation,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: AppFontWeights.emphasis,
+              if (widget.message.isStreaming && visualContent.isNotEmpty) {
+                widgets.add(
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 4),
+                    child: widget.hideStreamingIndicator
+                        ? const SizedBox(height: 16)
+                        : const LoadingIndicator(),
+                  ),
+                );
+              }
+              return widgets;
+            }(),
+            if (hasTranslation) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: _buildSharedChatSurface(
+                  context,
+                  borderRadius: BorderRadius.circular(16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  defaultColor: cs.primaryContainer.withValues(
+                    alpha: Theme.of(context).brightness == Brightness.dark
+                        ? 0.25
+                        : 0.30,
+                  ),
+                  child: AnimatedSize(
+                    duration: const Duration(milliseconds: 300),
+                    curve: const Cubic(0.2, 0.8, 0.2, 1),
+                    alignment: Alignment.topCenter,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        IosCardPress(
+                          onTap: widget.onToggleTranslation,
+                          borderRadius: BorderRadius.circular(12),
+                          baseColor: Colors.transparent,
+                          pressedBlendStrength: 0.12,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Lucide.Languages,
+                                size: 16,
                                 color: fg.strong,
                               ),
-                            ),
-                            const Spacer(),
-                            Icon(
-                              widget.translationExpanded
-                                  ? Lucide.ChevronDown
-                                  : Lucide.ChevronRight,
-                              size: 18,
-                              color: fg.strong,
-                            ),
-                          ],
+                              const SizedBox(width: 6),
+                              Text(
+                                l10n.chatMessageWidgetTranslation,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: AppFontWeights.emphasis,
+                                  color: fg.strong,
+                                ),
+                              ),
+                              const Spacer(),
+                              Icon(
+                                widget.translationExpanded
+                                    ? Lucide.ChevronDown
+                                    : Lucide.ChevronRight,
+                                size: 18,
+                                color: fg.strong,
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      if (widget.translationExpanded) ...[
-                        const SizedBox(height: 8),
-                        if (isTranslating)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
-                            child: Row(
-                              children: [
-                                const LoadingIndicator(),
-                                const SizedBox(width: 8),
-                                Builder(
-                                  builder: (context) {
-                                    final bool isDesktop =
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.macOS ||
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.windows ||
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.linux;
-                                    return Text(
-                                      l10n.chatMessageWidgetTranslating,
-                                      style: TextStyle(
-                                        fontSize: isDesktop ? 14.0 : 15.5,
-                                        color: fg.muted,
-                                        fontStyle: FontStyle.italic,
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
-                            child: RepaintBoundary(
-                              child: SelectionArea(
-                                key: ValueKey(
-                                  'translation_${widget.message.id}',
-                                ),
-                                child: Builder(
-                                  builder: (context) {
-                                    final bool isDesktop =
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.macOS ||
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.windows ||
-                                        defaultTargetPlatform ==
-                                            TargetPlatform.linux;
-                                    final double baseTranslation = isDesktop
-                                        ? 14.0
-                                        : 15.5;
-                                    Widget translationContent;
-                                    if (settings.enableAssistantMarkdown) {
-                                      translationContent =
-                                          MarkdownWithCodeHighlight(
-                                            text: translationText,
-                                            onCitationTap: (id) =>
-                                                _handleCitationTap(id),
-                                            citationIndexResolver: (id) =>
-                                                _resolveCitationIndex(
-                                                  id,
-                                                  citationIndexLookup,
-                                                ),
-                                            baseStyle: TextStyle(
-                                              fontSize: baseTranslation,
-                                              height: 1.4,
+                        if (widget.translationExpanded) ...[
+                          const SizedBox(height: 8),
+                          if (isTranslating)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                              child: Row(
+                                children: [
+                                  const LoadingIndicator(),
+                                  const SizedBox(width: 8),
+                                  Builder(
+                                    builder: (context) {
+                                      final bool isDesktop =
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.macOS ||
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.windows ||
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.linux;
+                                      return Text(
+                                        l10n.chatMessageWidgetTranslating,
+                                        style: TextStyle(
+                                          fontSize: isDesktop ? 14.0 : 15.5,
+                                          color: fg.muted,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+                              child: RepaintBoundary(
+                                child: SelectionArea(
+                                  key: ValueKey(
+                                    'translation_${widget.message.id}',
+                                  ),
+                                  child: Builder(
+                                    builder: (context) {
+                                      final bool isDesktop =
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.macOS ||
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.windows ||
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.linux;
+                                      final double baseTranslation = isDesktop
+                                          ? 14.0
+                                          : 15.5;
+                                      Widget translationContent;
+                                      if (enableAssistantMarkdown) {
+                                        translationContent =
+                                            MarkdownWithCodeHighlight(
+                                              text: translationText,
+                                              onCitationTap: (id) =>
+                                                  _handleCitationTap(id),
+                                              citationIndexResolver: (id) =>
+                                                  _resolveCitationIndex(
+                                                    id,
+                                                    citationIndexLookup,
+                                                  ),
+                                              baseStyle: TextStyle(
+                                                fontSize: baseTranslation,
+                                                height: 1.4,
+                                              ),
+                                            );
+                                      } else {
+                                        translationContent = Text(
+                                          translationText,
+                                          style: TextStyle(
+                                            fontSize: baseTranslation,
+                                            height: 1.4,
+                                            color: _chatSurfacePlainTextColor(
+                                              context,
                                             ),
-                                          );
-                                    } else {
-                                      translationContent = Text(
-                                        translationText,
+                                          ),
+                                        );
+                                      }
+                                      return DefaultTextStyle.merge(
                                         style: TextStyle(
                                           fontSize: baseTranslation,
                                           height: 1.4,
-                                          color: _chatSurfacePlainTextColor(
-                                            context,
-                                          ),
                                         ),
+                                        child: translationContent,
                                       );
-                                    }
-                                    return DefaultTextStyle.merge(
-                                      style: TextStyle(
-                                        fontSize: baseTranslation,
-                                        height: 1.4,
-                                      ),
-                                      child: translationContent,
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-          // Sources summary card (tap to open full citations)
-          if (searchItems.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _SourcesSummaryCard(
-              count: searchItems.length,
-              items: searchItems,
-              onTap: () => _showCitationsSheet(searchItems),
-            ),
-          ],
-          // Action buttons (hidden while generating)
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, anim) => SizeTransition(
-              sizeFactor: anim,
-              alignment: const AlignmentDirectional(-1.0, -1.0),
-              child: FadeTransition(opacity: anim, child: child),
-            ),
-            child: widget.message.isStreaming
-                ? const SizedBox.shrink()
-                : Padding(
-                    key: const ValueKey('assistant-actions'),
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: Center(
-                            child: IosIconButton(
-                              size: 16,
-                              padding: EdgeInsets.all(4),
-                              icon: Lucide.Copy,
-                              color: cs.onSurface.withValues(alpha: 0.9),
-                              onTap:
-                                  widget.onCopy ??
-                                  () {
-                                    Clipboard.setData(
-                                      ClipboardData(
-                                        text: widget.message.content,
-                                      ),
-                                    );
-                                    showAppSnackBar(
-                                      context,
-                                      message: l10n
-                                          .chatMessageWidgetCopiedToClipboard,
-                                      type: NotificationType.success,
-                                    );
-                                  },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: Center(
-                            child: IosIconButton(
-                              size: 16,
-                              padding: EdgeInsets.all(4),
-                              icon: Lucide.RefreshCw,
-                              color: cs.onSurface.withValues(alpha: 0.9),
-                              onTap: widget.onRegenerate == null
-                                  ? null
-                                  : () => _confirmRegeneration(
-                                      widget.onRegenerate!,
-                                    ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Consumer<TtsProvider>(
-                          builder: (context, tts, _) {
-                            final ttsActive = tts.playbackState.isActive;
-                            return SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: Center(
-                                child: IosIconButton(
-                                  size: 16,
-                                  padding: EdgeInsets.all(4),
-                                  onTap: widget.onSpeak,
-                                  color: cs.onSurface.withValues(alpha: 0.9),
-                                  builder: (color) => AnimatedSwitcher(
-                                    duration: const Duration(milliseconds: 200),
-                                    transitionBuilder: (child, anim) =>
-                                        ScaleTransition(
-                                          scale: anim,
-                                          child: FadeTransition(
-                                            opacity: anim,
-                                            child: child,
-                                          ),
-                                        ),
-                                    child: Icon(
-                                      ttsActive
-                                          ? Lucide.CircleStop
-                                          : Lucide.Volume2,
-                                      key: ValueKey(
-                                        ttsActive ? 'stop' : 'speak',
-                                      ),
-                                      size: 16,
-                                      color: color,
-                                    ),
+                                    },
                                   ),
                                 ),
                               ),
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: Center(
-                            child: GestureDetector(
-                              key: _translateBtnKey2,
-                              behavior: HitTestBehavior.opaque,
-                              onTapDown: (d) {
-                                final isDesktop =
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.macOS ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.windows ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.linux;
-                                if (isDesktop) {
-                                  try {
-                                    DesktopMenuAnchor.setPosition(
-                                      d.globalPosition,
-                                    );
-                                  } catch (_) {}
-                                }
-                              },
-                              onTap: () {
-                                final isDesktop =
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.macOS ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.windows ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.linux;
-                                if (isDesktop) {
-                                  _setAnchorFromKey(_translateBtnKey2);
-                                }
-                                widget.onTranslate?.call();
-                              },
-                              child: IosIconButton(
-                                size: 16,
-                                padding: EdgeInsets.all(4),
-                                icon: Lucide.Languages,
-                                color: cs.onSurface.withValues(alpha: 0.9),
-                                onTap: null,
-                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: Center(
-                            child: GestureDetector(
-                              key: _moreBtnKey2,
-                              onTapDown: (d) {
-                                final isDesktop =
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.macOS ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.windows ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.linux;
-                                if (isDesktop) {
-                                  try {
-                                    DesktopMenuAnchor.setPosition(
-                                      d.globalPosition,
-                                    );
-                                  } catch (_) {}
-                                }
-                              },
-                              onTap: () {
-                                final isDesktop =
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.macOS ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.windows ||
-                                    defaultTargetPlatform ==
-                                        TargetPlatform.linux;
-                                if (isDesktop) {
-                                  _setAnchorFromKey(_moreBtnKey2);
-                                }
-                                widget.onMore?.call();
-                              },
-                              child: IosIconButton(
-                                size: 16,
-                                padding: EdgeInsets.all(4),
-                                icon: Lucide.Ellipsis,
-                                color: cs.onSurface.withValues(alpha: 0.9),
-                                onTap: null,
-                              ),
-                            ),
-                          ),
-                        ),
-                        if ((widget.versionCount ?? 1) > 1) ...[
-                          const SizedBox(width: 6),
-                          _BranchSelector(
-                            index: widget.versionIndex ?? 0,
-                            total: widget.versionCount ?? 1,
-                            onPrev: widget.onPrevVersion,
-                            onNext: widget.onNextVersion,
-                          ),
-                        ],
-                        if (widget.showTokenStats &&
-                            widget.message.totalTokens != null) ...[
-                          const Spacer(),
-                          TokenDisplayWidget(
-                            totalTokens: widget.message.totalTokens!,
-                            promptTokens: widget.message.promptTokens,
-                            completionTokens: widget.message.completionTokens,
-                            cachedTokens: widget.message.cachedTokens,
-                            durationMs: widget.message.durationMs,
-                          ),
                         ],
                       ],
                     ),
                   ),
-          ),
-          if (!widget.message.isStreaming &&
-              widget.suggestions.isNotEmpty &&
-              widget.onSuggestionTap != null) ...[
-            const SizedBox(height: 8),
-            ChatSuggestionBubbles(
-              suggestions: widget.suggestions,
-              onTap: widget.onSuggestionTap!,
+                ),
+              ),
+            ],
+            // Sources summary card (tap to open full citations)
+            if (searchItems.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _SourcesSummaryCard(
+                count: searchItems.length,
+                items: searchItems,
+                onTap: () => _showCitationsSheet(searchItems),
+              ),
+            ],
+            // Action buttons (hidden while generating)
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, anim) => SizeTransition(
+                sizeFactor: anim,
+                alignment: const AlignmentDirectional(-1.0, -1.0),
+                child: FadeTransition(opacity: anim, child: child),
+              ),
+              child: widget.message.isStreaming
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      key: const ValueKey('assistant-actions'),
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: Center(
+                              child: IosIconButton(
+                                size: 16,
+                                padding: EdgeInsets.all(4),
+                                icon: Lucide.Copy,
+                                color: cs.onSurface.withValues(alpha: 0.9),
+                                onTap:
+                                    widget.onCopy ??
+                                    () {
+                                      Clipboard.setData(
+                                        ClipboardData(
+                                          text: widget.message.content,
+                                        ),
+                                      );
+                                      showAppSnackBar(
+                                        context,
+                                        message: l10n
+                                            .chatMessageWidgetCopiedToClipboard,
+                                        type: NotificationType.success,
+                                      );
+                                    },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: Center(
+                              child: IosIconButton(
+                                size: 16,
+                                padding: EdgeInsets.all(4),
+                                icon: Lucide.RefreshCw,
+                                color: cs.onSurface.withValues(alpha: 0.9),
+                                onTap: widget.onRegenerate == null
+                                    ? null
+                                    : () => _confirmRegeneration(
+                                        widget.onRegenerate!,
+                                      ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Consumer<TtsProvider>(
+                            builder: (context, tts, _) {
+                              final ttsActive = tts.playbackState.isActive;
+                              return SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: Center(
+                                  child: IosIconButton(
+                                    size: 16,
+                                    padding: EdgeInsets.all(4),
+                                    onTap: widget.onSpeak,
+                                    color: cs.onSurface.withValues(alpha: 0.9),
+                                    builder: (color) => AnimatedSwitcher(
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      transitionBuilder: (child, anim) =>
+                                          ScaleTransition(
+                                            scale: anim,
+                                            child: FadeTransition(
+                                              opacity: anim,
+                                              child: child,
+                                            ),
+                                          ),
+                                      child: Icon(
+                                        ttsActive
+                                            ? Lucide.CircleStop
+                                            : Lucide.Volume2,
+                                        key: ValueKey(
+                                          ttsActive ? 'stop' : 'speak',
+                                        ),
+                                        size: 16,
+                                        color: color,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: Center(
+                              child: GestureDetector(
+                                key: _translateBtnKey2,
+                                behavior: HitTestBehavior.opaque,
+                                onTapDown: (d) {
+                                  final isDesktop =
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.macOS ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.windows ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.linux;
+                                  if (isDesktop) {
+                                    try {
+                                      DesktopMenuAnchor.setPosition(
+                                        d.globalPosition,
+                                      );
+                                    } catch (_) {}
+                                  }
+                                },
+                                onTap: () {
+                                  final isDesktop =
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.macOS ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.windows ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.linux;
+                                  if (isDesktop) {
+                                    _setAnchorFromKey(_translateBtnKey2);
+                                  }
+                                  widget.onTranslate?.call();
+                                },
+                                child: IosIconButton(
+                                  size: 16,
+                                  padding: EdgeInsets.all(4),
+                                  icon: Lucide.Languages,
+                                  color: cs.onSurface.withValues(alpha: 0.9),
+                                  onTap: null,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: Center(
+                              child: GestureDetector(
+                                key: _moreBtnKey2,
+                                onTapDown: (d) {
+                                  final isDesktop =
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.macOS ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.windows ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.linux;
+                                  if (isDesktop) {
+                                    try {
+                                      DesktopMenuAnchor.setPosition(
+                                        d.globalPosition,
+                                      );
+                                    } catch (_) {}
+                                  }
+                                },
+                                onTap: () {
+                                  final isDesktop =
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.macOS ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.windows ||
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.linux;
+                                  if (isDesktop) {
+                                    _setAnchorFromKey(_moreBtnKey2);
+                                  }
+                                  widget.onMore?.call();
+                                },
+                                child: IosIconButton(
+                                  size: 16,
+                                  padding: EdgeInsets.all(4),
+                                  icon: Lucide.Ellipsis,
+                                  color: cs.onSurface.withValues(alpha: 0.9),
+                                  onTap: null,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if ((widget.versionCount ?? 1) > 1) ...[
+                            const SizedBox(width: 6),
+                            _BranchSelector(
+                              index: widget.versionIndex ?? 0,
+                              total: widget.versionCount ?? 1,
+                              onPrev: widget.onPrevVersion,
+                              onNext: widget.onNextVersion,
+                            ),
+                          ],
+                          if (widget.showTokenStats &&
+                              widget.message.totalTokens != null) ...[
+                            const Spacer(),
+                            TokenDisplayWidget(
+                              totalTokens: widget.message.totalTokens!,
+                              promptTokens: widget.message.promptTokens,
+                              completionTokens: widget.message.completionTokens,
+                              cachedTokens: widget.message.cachedTokens,
+                              durationMs: widget.message.durationMs,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
             ),
+            if (!widget.message.isStreaming &&
+                widget.suggestions.isNotEmpty &&
+                widget.onSuggestionTap != null) ...[
+              const SizedBox(height: 8),
+              ChatSuggestionBubbles(
+                suggestions: widget.suggestions,
+                onTap: widget.onSuggestionTap!,
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -3246,7 +3365,14 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
   // We scan from end to start so "latest" items win when there are duplicates.
   List<Map<String, dynamic>> _allSearchItems() {
     final parts = widget.toolParts ?? const <ToolUIPart>[];
-    if (parts.isEmpty) return const <Map<String, dynamic>>[];
+    if (identical(parts, _searchItemsParts) && _searchItemsCache != null) {
+      return _searchItemsCache!;
+    }
+    if (parts.isEmpty) {
+      _searchItemsParts = parts;
+      _searchItemsCache = const <Map<String, dynamic>>[];
+      return _searchItemsCache!;
+    }
 
     final out = <Map<String, dynamic>>[];
     final seen = <String>{};
@@ -3274,6 +3400,8 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
         // ignore broken tool payload
       }
     }
+    _searchItemsParts = parts;
+    _searchItemsCache = out;
     return out;
   }
 
@@ -3410,9 +3538,17 @@ class _ChatMessageWidgetState extends State<ChatMessageWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.message.role == 'user') return _buildUserMessage();
-    if (widget.message.role == 'tool') return _buildToolMessage();
-    return _buildAssistantMessage();
+    final isUser = widget.message.role == 'user';
+    final palette = _computeChatSurfaceForegroundPalette(
+      context,
+      isUser: isUser,
+    );
+    final child = isUser
+        ? _buildUserMessage()
+        : widget.message.role == 'tool'
+        ? _buildToolMessage()
+        : _buildAssistantMessage();
+    return _ChatSurfaceTheme(palette: palette, child: child);
   }
 }
 
@@ -3450,22 +3586,22 @@ class _AnimatedPopupState extends State<_AnimatedPopup> {
 }
 
 ({ChatMessageBackgroundStyle style, ChatBubbleStyleOverrides overrides})
-_chatSurfaceStyleSelection(BuildContext context) {
+_chatSurfaceStyleSelection(BuildContext context, {bool isUser = false}) {
   return context.select<
     SettingsProvider,
     ({ChatMessageBackgroundStyle style, ChatBubbleStyleOverrides overrides})
   >(
     (s) => (
       style: s.chatMessageBackgroundStyle,
-      overrides: s.chatBubbleStyleOverrides,
+      overrides: s.chatBubbleStyleOverridesFor(isUser: isUser),
     ),
   );
 }
 
-Color _chatSurfacePlainTextColor(BuildContext context) {
+Color _chatSurfacePlainTextColor(BuildContext context, {bool isUser = false}) {
   final theme = Theme.of(context);
   final cs = theme.colorScheme;
-  final selection = _chatSurfaceStyleSelection(context);
+  final selection = _chatSurfaceStyleSelection(context, isUser: isUser);
   if (selection.style == ChatMessageBackgroundStyle.defaultStyle) {
     return cs.onSurface;
   }
@@ -3484,10 +3620,11 @@ Widget _buildSharedChatSurface(
   required EdgeInsetsGeometry padding,
   Color? defaultColor,
   bool bareOnDefault = false,
+  bool isUser = false,
 }) {
   final theme = Theme.of(context);
   final cs = theme.colorScheme;
-  final selection = _chatSurfaceStyleSelection(context);
+  final selection = _chatSurfaceStyleSelection(context, isUser: isUser);
   final style = selection.style;
   final overrides = selection.overrides;
   final resolved = resolveBubbleStyle(cs, theme.brightness, style, overrides);
@@ -3503,25 +3640,11 @@ Widget _buildSharedChatSurface(
   switch (style) {
     case ChatMessageBackgroundStyle.frosted:
       final radius = BorderRadius.circular(resolved.radius);
-      return ClipRRect(
+      return FrostedSurface(
+        style: resolved,
         borderRadius: radius,
-        child: BackdropFilter.grouped(
-          filter: ui.ImageFilter.blur(
-            sigmaX: resolved.blurSigma,
-            sigmaY: resolved.blurSigma,
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: resolved.background,
-              borderRadius: radius,
-              border: Border.all(
-                color: resolved.border,
-                width: resolved.borderWidth,
-              ),
-            ),
-            child: paddedChild,
-          ),
-        ),
+        isUser: isUser,
+        child: paddedChild,
       );
     case ChatMessageBackgroundStyle.solid:
       final radius = BorderRadius.circular(resolved.radius);
@@ -3569,14 +3692,55 @@ class _ChatSurfaceForegroundPalette {
   final Color body;
   final Color divider;
   final Color accent;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _ChatSurfaceForegroundPalette &&
+      other.strong == strong &&
+      other.medium == medium &&
+      other.muted == muted &&
+      other.body == body &&
+      other.divider == divider &&
+      other.accent == accent;
+
+  @override
+  int get hashCode => Object.hash(strong, medium, muted, body, divider, accent);
+}
+
+class _ChatSurfaceTheme extends InheritedWidget {
+  const _ChatSurfaceTheme({required this.palette, required super.child});
+
+  final _ChatSurfaceForegroundPalette palette;
+
+  static _ChatSurfaceForegroundPalette? maybeOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<_ChatSurfaceTheme>()
+        ?.palette;
+  }
+
+  @override
+  bool updateShouldNotify(_ChatSurfaceTheme oldWidget) =>
+      palette != oldWidget.palette;
 }
 
 _ChatSurfaceForegroundPalette _chatSurfaceForegroundPalette(
-  BuildContext context,
-) {
+  BuildContext context, {
+  bool isUser = false,
+}) {
+  if (!isUser) {
+    final inherited = _ChatSurfaceTheme.maybeOf(context);
+    if (inherited != null) return inherited;
+  }
+  return _computeChatSurfaceForegroundPalette(context, isUser: isUser);
+}
+
+_ChatSurfaceForegroundPalette _computeChatSurfaceForegroundPalette(
+  BuildContext context, {
+  bool isUser = false,
+}) {
   final theme = Theme.of(context);
   final cs = theme.colorScheme;
-  final selection = _chatSurfaceStyleSelection(context);
+  final selection = _chatSurfaceStyleSelection(context, isUser: isUser);
   if (selection.style == ChatMessageBackgroundStyle.defaultStyle) {
     return _ChatSurfaceForegroundPalette(
       strong: cs.secondary,
@@ -3887,13 +4051,20 @@ class ToolUIPart {
   final Map<String, dynamic> arguments;
   final String? content; // null means still loading/result not yet available
   final bool loading;
+
+  /// Stable memo identity from the original live tool, if any.
+  final int? memoToken;
+
   const ToolUIPart({
     required this.id,
     required this.toolName,
     required this.arguments,
     this.content,
     this.loading = false,
+    this.memoToken,
   });
+
+  int get cacheToken => memoToken ?? identityHashCode(this);
 }
 
 // Data for a reasoning segment (for mixed display)
@@ -3916,22 +4087,22 @@ class ReasoningSegment {
     this.onToggle,
     this.toolStartIndex = 0,
   });
-}
 
-enum _RenderBlockType { text, thinking }
+  /// Toggle is excluded: the step State looks it up on tap so a new
+  /// closure every parent rebuild does not bust widget memoization.
+  @override
+  bool operator ==(Object other) =>
+      other is ReasoningSegment &&
+      other.text == text &&
+      other.expanded == expanded &&
+      other.loading == loading &&
+      other.startAt == startAt &&
+      other.finishedAt == finishedAt &&
+      other.toolStartIndex == toolStartIndex;
 
-class _RenderBlock {
-  const _RenderBlock.text(this.text)
-    : type = _RenderBlockType.text,
-      steps = const <_TimelineStepData>[];
-
-  const _RenderBlock.thinking(this.steps)
-    : type = _RenderBlockType.thinking,
-      text = null;
-
-  final _RenderBlockType type;
-  final String? text;
-  final List<_TimelineStepData> steps;
+  @override
+  int get hashCode =>
+      Object.hash(text, expanded, loading, startAt, finishedAt, toolStartIndex);
 }
 
 class _TimelineStepData {
@@ -3939,22 +4110,127 @@ class _TimelineStepData {
     required this.reasoning,
     required this.reasoningCountAfter,
     required this.toolCountAfter,
+    this.sourceOrdinal = 0,
   }) : tool = null;
 
   const _TimelineStepData.tool({
     required this.tool,
     required this.reasoningCountAfter,
     required this.toolCountAfter,
+    this.sourceOrdinal = 0,
   }) : reasoning = null;
 
   final ReasoningSegment? reasoning;
   final ToolUIPart? tool;
   final int reasoningCountAfter;
   final int toolCountAfter;
+  final int sourceOrdinal;
 
   bool get isReasoning => reasoning != null;
   bool get isTool => tool != null;
   bool get loading => reasoning?.loading ?? tool?.loading ?? false;
+}
+
+/// Value-equal id set so [context.select] can ignore identical approval snapshots.
+class _IdSet {
+  const _IdSet(this.ids);
+  final Set<String> ids;
+
+  bool contains(String? id) => id != null && ids.contains(id);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _IdSet &&
+      other.ids.length == ids.length &&
+      other.ids.containsAll(ids);
+
+  @override
+  int get hashCode => Object.hashAllUnordered(ids);
+}
+
+ToolApprovalRequest? _matchingApprovalRequest({
+  required ToolApprovalService approval,
+  required String? conversationId,
+  String? toolCallId,
+}) {
+  if (toolCallId == null || toolCallId.isEmpty) {
+    return null;
+  }
+  return approval.pendingFor(
+    toolCallId: toolCallId,
+    conversationId: conversationId,
+  );
+}
+
+bool _shouldShowToolCard(
+  BuildContext context,
+  ToolUIPart part, {
+  bool? showToolCards,
+  String? conversationId,
+}) {
+  final visible =
+      showToolCards ??
+      context.select<SettingsProvider, bool>((s) => s.showToolCards);
+  var pendingApproval = false;
+  if (!visible && part.loading) {
+    try {
+      pendingApproval = context.select<ToolApprovalService, bool>(
+        (approval) =>
+            _matchingApprovalRequest(
+              approval: approval,
+              conversationId: conversationId,
+              toolCallId: part.id,
+            ) !=
+            null,
+      );
+    } catch (_) {}
+  }
+  return isTimelineToolVisible(
+    toolName: part.toolName,
+    loading: part.loading,
+    showToolCards: visible,
+    pendingApproval: pendingApproval,
+    filterBuiltinSearch: false,
+  );
+}
+
+List<_TimelineStepData> _visibleChatTimelineSteps(
+  BuildContext context,
+  List<_TimelineStepData> steps, {
+  required bool showThinkingCards,
+  required bool showToolCards,
+  required String conversationId,
+}) {
+  if (showThinkingCards && showToolCards) return steps;
+  ToolApprovalService? approval;
+  if (!showToolCards) {
+    try {
+      approval = context.read<ToolApprovalService>();
+      context.select<ToolApprovalService, int>(
+        (service) => Object.hashAll([
+          for (final req in service.pendingRequests)
+            Object.hash(req.toolCallId, req.conversationId),
+        ]),
+      );
+    } catch (_) {}
+  }
+  return [
+    for (final step in steps)
+      if (step.isReasoning
+          ? showThinkingCards
+          : isTimelineToolVisible(
+              toolName: step.tool!.toolName,
+              loading: step.tool!.loading,
+              showToolCards: showToolCards,
+              pendingApproval:
+                  approval?.pendingFor(
+                    toolCallId: step.tool?.id ?? '',
+                    conversationId: conversationId,
+                  ) !=
+                  null,
+            ))
+        step,
+  ];
 }
 
 enum _ReasoningStepState { collapsed, preview, expanded }
@@ -3966,10 +4242,90 @@ const double _timelineGap = 8;
 const double _timelineLineGap = 3;
 const double _timelineLineX = (_timelineIconColumnWidth - 1) / 2;
 
+/// Holds the latest reasoning-toggle callbacks so memoized step widgets can
+/// look them up on tap without baking a new closure into the cache key.
+class _ChainOfThoughtActions extends InheritedWidget {
+  const _ChainOfThoughtActions({required this.toggles, required super.child});
+
+  final List<VoidCallback?> toggles;
+
+  static VoidCallback? toggleOf(BuildContext context, int index) {
+    final scope = context
+        .getInheritedWidgetOfExactType<_ChainOfThoughtActions>();
+    if (scope == null || index < 0 || index >= scope.toggles.length) {
+      return null;
+    }
+    return scope.toggles[index];
+  }
+
+  @override
+  bool updateShouldNotify(_ChainOfThoughtActions oldWidget) => false;
+}
+
+/// Holds the latest recovered-answer callback so memoized ask-user steps can
+/// submit without baking a new closure into the cache key.
+class _RecoveredAskUserAction extends InheritedWidget {
+  const _RecoveredAskUserAction({
+    required this.conversationId,
+    required this.onSubmit,
+    required super.child,
+  });
+
+  final String conversationId;
+  final Future<void> Function(ToolUIPart part, AskUserResult result)? onSubmit;
+
+  static _RecoveredAskUserAction? maybeOf(BuildContext context) {
+    return context.getInheritedWidgetOfExactType<_RecoveredAskUserAction>();
+  }
+
+  @override
+  bool updateShouldNotify(_RecoveredAskUserAction oldWidget) => false;
+}
+
+class _CachedTimelineStep extends StatefulWidget {
+  const _CachedTimelineStep({
+    super.key,
+    required this.signature,
+    required this.builder,
+  });
+
+  /// Must include every ambient input the [builder] reads. Returning the same
+  /// widget instance lets [Element.updateChild] skip the subtree entirely.
+  final Object signature;
+  final Widget Function() builder;
+
+  @override
+  State<_CachedTimelineStep> createState() => _CachedTimelineStepState();
+}
+
+class _CachedTimelineStepState extends State<_CachedTimelineStep> {
+  Widget? _rendered;
+
+  @override
+  void didUpdateWidget(covariant _CachedTimelineStep oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.signature != widget.signature) {
+      _rendered = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _rendered ??= widget.builder();
+}
+
 class _ChainOfThoughtCard extends StatefulWidget {
-  const _ChainOfThoughtCard({required this.steps, this.onRecoveredAnswer});
+  const _ChainOfThoughtCard({
+    required this.steps,
+    required this.conversationId,
+    required this.showThinkingCards,
+    required this.showToolCards,
+    this.onRecoveredAnswer,
+  });
 
   final List<_TimelineStepData> steps;
+  final String conversationId;
+  final bool showThinkingCards;
+  final bool showToolCards;
   final Future<void> Function(ToolUIPart part, AskUserResult result)?
   onRecoveredAnswer;
 
@@ -3980,6 +4336,60 @@ class _ChainOfThoughtCard extends StatefulWidget {
 class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard> {
   bool _showAllSteps = false;
 
+  Object _reasoningStepSignature({
+    required ReasoningSegment step,
+    required bool isFirst,
+    required bool isLast,
+    required _ChatSurfaceForegroundPalette fg,
+    required Brightness brightness,
+    required bool enableReasoningMarkdown,
+    required double textScale,
+    required bool hasToggle,
+  }) {
+    return Object.hash(
+      'reasoning',
+      identityHashCode(step.text),
+      step.expanded,
+      step.loading,
+      step.startAt,
+      step.finishedAt,
+      step.toolStartIndex,
+      isFirst,
+      isLast,
+      fg,
+      brightness,
+      enableReasoningMarkdown,
+      textScale,
+      hasToggle,
+    );
+  }
+
+  Object _toolStepSignature({
+    required ToolUIPart part,
+    required bool isFirst,
+    required bool isLast,
+    required _ChatSurfaceForegroundPalette fg,
+    required Brightness brightness,
+    required bool showToolResultSummary,
+    required bool hideToolResultImages,
+    required bool pendingApproval,
+    required double textScale,
+  }) {
+    return Object.hash(
+      'tool',
+      widget.conversationId,
+      part.cacheToken,
+      isFirst,
+      isLast,
+      fg,
+      brightness,
+      showToolResultSummary,
+      hideToolResultImages,
+      pendingApproval,
+      textScale,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -3988,15 +4398,53 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard> {
     final collapseThinkingSteps = context.select<SettingsProvider, bool>(
       (s) => s.collapseThinkingSteps,
     );
+    final showToolResultSummary = context.select<SettingsProvider, bool>(
+      (s) => s.showToolResultSummary,
+    );
+    final hideToolResultImages = context.select<SettingsProvider, bool>(
+      (s) => s.hideToolResultImages,
+    );
+    final enableReasoningMarkdown = context.select<SettingsProvider, bool>(
+      (s) => s.enableReasoningMarkdown,
+    );
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final filteredSteps = _visibleChatTimelineSteps(
+      context,
+      widget.steps,
+      showThinkingCards: widget.showThinkingCards,
+      showToolCards: widget.showToolCards,
+      conversationId: widget.conversationId,
+    );
+    if (filteredSteps.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final pendingApprovalIds = context.select<ToolApprovalService, _IdSet>((
+      approval,
+    ) {
+      return _IdSet({
+        for (final step in filteredSteps)
+          if (step.tool != null &&
+              _matchingApprovalRequest(
+                    approval: approval,
+                    conversationId: widget.conversationId,
+                    toolCallId: step.tool!.id,
+                  ) !=
+                  null)
+            step.tool!.id,
+      });
+    });
     final l10n = AppLocalizations.of(context)!;
     final enableAdaptiveWidth =
-        widget.steps.isNotEmpty &&
-        widget.steps.every((step) => step.isReasoning) &&
-        !widget.steps.any((step) => step.isReasoning && step.loading);
-    final canCollapse = collapseThinkingSteps && widget.steps.length > 2;
-    final visibleSteps = canCollapse && !_showAllSteps
-        ? widget.steps.sublist(widget.steps.length - 2)
-        : widget.steps;
+        filteredSteps.isNotEmpty &&
+        filteredSteps.every((step) => step.isReasoning) &&
+        !filteredSteps.any((step) => step.isReasoning && step.loading);
+    final canCollapse = collapseThinkingSteps && filteredSteps.length > 2;
+    final hiddenCount = canCollapse && !_showAllSteps
+        ? filteredSteps.length - 2
+        : 0;
+    final visibleSteps = hiddenCount > 0
+        ? filteredSteps.sublist(hiddenCount)
+        : filteredSteps;
     final fillWidth =
         !enableAdaptiveWidth ||
         visibleSteps.any(
@@ -4016,68 +4464,123 @@ class _ChainOfThoughtCardState extends State<_ChainOfThoughtCard> {
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOutCubicEmphasized,
         alignment: Alignment.topLeft,
-        child: Column(
-          mainAxisSize: fillWidth ? MainAxisSize.max : MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (canCollapse)
-              IosCardPress(
-                onTap: () => setState(() => _showAllSteps = !_showAllSteps),
-                borderRadius: BorderRadius.circular(12),
-                baseColor: Colors.transparent,
-                pressedScale: 1,
-                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: _timelineIconColumnWidth,
-                        child: Center(
-                          child: Icon(
-                            _showAllSteps
-                                ? Lucide.ChevronUp
-                                : Lucide.ChevronDown,
-                            size: 16,
-                            color: fg.strong,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: _timelineGap),
-                      Text(
-                        _showAllSteps
-                            ? l10n.chainOfThoughtCollapse
-                            : l10n.chainOfThoughtExpandSteps(
-                                widget.steps.length - visibleSteps.length,
+        child: _RecoveredAskUserAction(
+          conversationId: widget.conversationId,
+          onSubmit: widget.onRecoveredAnswer,
+          child: _ChainOfThoughtActions(
+            toggles: [
+              for (final step in filteredSteps) step.reasoning?.onToggle,
+            ],
+            child: Column(
+              mainAxisSize: fillWidth ? MainAxisSize.max : MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (canCollapse)
+                  IosCardPress(
+                    onTap: () => setState(() => _showAllSteps = !_showAllSteps),
+                    borderRadius: BorderRadius.circular(12),
+                    baseColor: Colors.transparent,
+                    pressedScale: 1,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 0,
+                      vertical: 0,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: _timelineIconColumnWidth,
+                            child: Center(
+                              child: Icon(
+                                _showAllSteps
+                                    ? Lucide.ChevronUp
+                                    : Lucide.ChevronDown,
+                                size: 16,
+                                color: fg.strong,
                               ),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: AppFontWeights.semibold,
-                          color: fg.strong,
+                            ),
+                          ),
+                          const SizedBox(width: _timelineGap),
+                          Text(
+                            _showAllSteps
+                                ? l10n.chainOfThoughtCollapse
+                                : l10n.chainOfThoughtExpandSteps(
+                                    widget.steps.length - visibleSteps.length,
+                                  ),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: AppFontWeights.semibold,
+                              color: fg.strong,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                for (var i = 0; i < visibleSteps.length; i++)
+                  () {
+                    final step = visibleSteps[i];
+                    final sourceIndex = hiddenCount + i;
+                    final isFirst = i == 0;
+                    final isLast = i == visibleSteps.length - 1;
+                    if (step.isReasoning) {
+                      final reasoning = step.reasoning!;
+                      final hasToggle = reasoning.onToggle != null;
+                      return _CachedTimelineStep(
+                        key: ValueKey<String>('reasoning-$sourceIndex'),
+                        signature: _reasoningStepSignature(
+                          step: reasoning,
+                          isFirst: isFirst,
+                          isLast: isLast,
+                          fg: fg,
+                          brightness: theme.brightness,
+                          enableReasoningMarkdown: enableReasoningMarkdown,
+                          textScale: textScale,
+                          hasToggle: hasToggle,
+                        ),
+                        builder: () => _ChainOfThoughtReasoningStep(
+                          step: reasoning,
+                          sourceIndex: sourceIndex,
+                          isFirst: isFirst,
+                          isLast: isLast,
+                        ),
+                      );
+                    }
+                    final part = step.tool!;
+                    return _CachedTimelineStep(
+                      key: ValueKey<String>(
+                        timelineToolStepKey(
+                          id: part.id,
+                          sourceOrdinal: step.sourceOrdinal,
+                          toolName: part.toolName,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ...visibleSteps.asMap().entries.map((entry) {
-              final index = entry.key;
-              final step = entry.value;
-              if (step.isReasoning) {
-                return _ChainOfThoughtReasoningStep(
-                  step: step.reasoning!,
-                  isFirst: index == 0,
-                  isLast: index == visibleSteps.length - 1,
-                );
-              }
-              return _ChainOfThoughtToolStep(
-                part: step.tool!,
-                isFirst: index == 0,
-                isLast: index == visibleSteps.length - 1,
-                onRecoveredAnswer: widget.onRecoveredAnswer,
-              );
-            }),
-          ],
+                      signature: _toolStepSignature(
+                        part: part,
+                        isFirst: isFirst,
+                        isLast: isLast,
+                        fg: fg,
+                        brightness: theme.brightness,
+                        showToolResultSummary: showToolResultSummary,
+                        hideToolResultImages: hideToolResultImages,
+                        pendingApproval: pendingApprovalIds.contains(part.id),
+                        textScale: textScale,
+                      ),
+                      builder: () {
+                        debugTimelineToolStepBuilds++;
+                        return _ChainOfThoughtToolStep(
+                          part: part,
+                          conversationId: widget.conversationId,
+                          isFirst: isFirst,
+                          isLast: isLast,
+                        );
+                      },
+                    );
+                  }(),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -4101,6 +4604,7 @@ class _TimelineStepShell extends StatelessWidget {
     this.indicator,
     this.content,
     this.contentVisible = false,
+    this.expectContent = false,
   });
 
   final Widget icon;
@@ -4112,6 +4616,10 @@ class _TimelineStepShell extends StatelessWidget {
   final Widget? indicator;
   final Widget? content;
   final bool contentVisible;
+
+  /// Keep [AnimatedSize] mounted so a later result or expand can grow in.
+  /// Finished steps with no body skip the slot entirely.
+  final bool expectContent;
 
   @override
   Widget build(BuildContext context) {
@@ -4151,49 +4659,60 @@ class _TimelineStepShell extends StatelessWidget {
       ],
     );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        IosCardPress(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          baseColor: Colors.transparent,
-          pressedScale: 1,
-          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
-          child: header,
-        ),
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            if (!isLast)
-              Positioned(
-                left: _timelineLineX,
-                top: 0,
-                bottom: 0,
-                child: SizedBox(
-                  key: const ValueKey('chatMessageTimelineContentLine'),
-                  width: 1,
-                  child: ColoredBox(color: fg.divider),
+    final pressableHeader = IosCardPress(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      baseColor: Colors.transparent,
+      pressedScale: 1,
+      padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
+      child: header,
+    );
+    if (content == null && !expectContent) {
+      return KeyedSubtree(
+        key: ValueKey<String>('chatMessageTimelineStepShell:$isFirst:$isLast'),
+        child: pressableHeader,
+      );
+    }
+
+    return KeyedSubtree(
+      key: ValueKey<String>('chatMessageTimelineStepShell:$isFirst:$isLast'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          pressableHeader,
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              if (!isLast)
+                Positioned(
+                  left: _timelineLineX,
+                  top: 0,
+                  bottom: 0,
+                  child: SizedBox(
+                    key: const ValueKey('chatMessageTimelineContentLine'),
+                    width: 1,
+                    child: ColoredBox(color: fg.divider),
+                  ),
                 ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 300),
+                curve: const Cubic(0.2, 0.8, 0.2, 1),
+                alignment: Alignment.topLeft,
+                child: contentVisible
+                    ? Padding(
+                        padding: const EdgeInsets.only(
+                          left: _timelineIconColumnWidth + _timelineGap,
+                          top: 4,
+                          bottom: 8,
+                        ),
+                        child: content,
+                      )
+                    : const SizedBox.shrink(),
               ),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 300),
-              curve: const Cubic(0.2, 0.8, 0.2, 1),
-              alignment: Alignment.topLeft,
-              child: contentVisible && content != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(
-                        left: _timelineIconColumnWidth + _timelineGap,
-                        top: 4,
-                        bottom: 8,
-                      ),
-                      child: content,
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ],
-        ),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -4211,55 +4730,74 @@ class _TimelineIconColumn extends StatelessWidget {
   final bool isLast;
   final Color lineColor;
 
-  Widget _lineSegment({required bool visible, required Key key}) {
-    if (!visible) return const Expanded(child: SizedBox.expand());
-    return Expanded(
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            key: key,
-            width: 1,
-            child: ColoredBox(color: lineColor),
-          ),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      key: ValueKey<String>('chatMessageTimelineIconColumn:$isFirst:$isLast'),
+      painter: _TimelineLinePainter(
+        isFirst: isFirst,
+        isLast: isLast,
+        lineColor: lineColor,
       ),
+      child: SizedBox.expand(child: Center(child: icon)),
     );
+  }
+}
+
+class _TimelineLinePainter extends CustomPainter {
+  const _TimelineLinePainter({
+    required this.isFirst,
+    required this.isLast,
+    required this.lineColor,
+  });
+
+  final bool isFirst;
+  final bool isLast;
+  final Color lineColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = lineColor
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    final x = size.width / 2;
+    final iconTop = (size.height - _timelineIconSize) / 2;
+    final iconBottom = iconTop + _timelineIconSize;
+    if (!isFirst) {
+      canvas.drawLine(
+        Offset(x, 0),
+        Offset(x, math.max(0, iconTop - _timelineLineGap)),
+        paint,
+      );
+    }
+    if (!isLast) {
+      canvas.drawLine(
+        Offset(x, math.min(size.height, iconBottom + _timelineLineGap)),
+        Offset(x, size.height),
+        paint,
+      );
+    }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _lineSegment(
-          visible: !isFirst,
-          key: const ValueKey('chatMessageTimelineHeaderTopLine'),
-        ),
-        const SizedBox(height: _timelineLineGap),
-        SizedBox(
-          width: _timelineIconColumnWidth,
-          height: _timelineIconSize,
-          child: Center(child: icon),
-        ),
-        const SizedBox(height: _timelineLineGap),
-        _lineSegment(
-          visible: !isLast,
-          key: const ValueKey('chatMessageTimelineHeaderBottomLine'),
-        ),
-      ],
-    );
+  bool shouldRepaint(covariant _TimelineLinePainter oldDelegate) {
+    return oldDelegate.isFirst != isFirst ||
+        oldDelegate.isLast != isLast ||
+        oldDelegate.lineColor != lineColor;
   }
 }
 
 class _ChainOfThoughtReasoningStep extends StatefulWidget {
   const _ChainOfThoughtReasoningStep({
     required this.step,
+    required this.sourceIndex,
     required this.isFirst,
     required this.isLast,
   });
 
   final ReasoningSegment step;
+  final int sourceIndex;
   final bool isFirst;
   final bool isLast;
 
@@ -4362,11 +4900,13 @@ class _ChainOfThoughtReasoningStepState
     );
     final state = _stepState;
     final display = _sanitize(widget.step.text);
-    final label = Row(
-      children: [
-        _Shimmer(
-          enabled: widget.step.loading,
-          child: Text(
+    final label = ThinkingSheen(
+      enabled: widget.step.loading,
+      color: fg.strong,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
             l10n.chatMessageWidgetDeepThinking,
             style: TextStyle(
               fontSize: 13,
@@ -4374,31 +4914,25 @@ class _ChainOfThoughtReasoningStepState
               color: fg.strong,
             ),
           ),
-        ),
-        if (widget.step.startAt != null) ...[
-          const SizedBox(width: 6),
-          ValueListenableBuilder<int>(
-            valueListenable: _elapsedTick,
-            builder: (context, _, __) => _Shimmer(
-              enabled: widget.step.loading,
-              child: Text(
+          if (widget.step.startAt != null) ...[
+            const SizedBox(width: 6),
+            ValueListenableBuilder<int>(
+              valueListenable: _elapsedTick,
+              builder: (context, _, __) => Text(
                 _elapsed(),
                 style: TextStyle(fontSize: 13, color: fg.medium),
               ),
             ),
-          ),
+          ],
         ],
-      ],
+      ),
     );
 
     final icon = SizedBox(
       width: 18,
       height: 18,
       child: Center(
-        child: _Shimmer(
-          enabled: widget.step.loading,
-          child: ReasoningIcons.thinkingCardIcon(size: 18, color: fg.strong),
-        ),
+        child: ReasoningIcons.thinkingCardIcon(size: 18, color: fg.strong),
       ),
     );
 
@@ -4467,23 +5001,31 @@ class _ChainOfThoughtReasoningStepState
       content = SelectionArea(child: reasoningContent(display));
     }
 
+    final hasToggle =
+        _ChainOfThoughtActions.toggleOf(context, widget.sourceIndex) != null;
     return _TimelineStepShell(
       icon: icon,
       label: label,
       isFirst: widget.isFirst,
       isLast: widget.isLast,
-      onTap: widget.step.onToggle,
-      indicator: widget.step.onToggle == null
-          ? null
-          : Icon(
+      onTap: hasToggle
+          ? () => _ChainOfThoughtActions.toggleOf(
+              context,
+              widget.sourceIndex,
+            )?.call()
+          : null,
+      indicator: hasToggle
+          ? Icon(
               state == _ReasoningStepState.expanded
                   ? Lucide.ChevronUp
                   : Lucide.ChevronDown,
               size: 16,
               color: fg.muted,
-            ),
+            )
+          : null,
       content: content,
       contentVisible: state != _ReasoningStepState.collapsed,
+      expectContent: true,
     );
   }
 }
@@ -4491,16 +5033,15 @@ class _ChainOfThoughtReasoningStepState
 class _ChainOfThoughtToolStep extends StatefulWidget {
   const _ChainOfThoughtToolStep({
     required this.part,
+    required this.conversationId,
     required this.isFirst,
     required this.isLast,
-    this.onRecoveredAnswer,
   });
 
   final ToolUIPart part;
+  final String conversationId;
   final bool isFirst;
   final bool isLast;
-  final Future<void> Function(ToolUIPart part, AskUserResult result)?
-  onRecoveredAnswer;
 
   @override
   State<_ChainOfThoughtToolStep> createState() =>
@@ -4576,8 +5117,9 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
   void _showDenyDialog(
     BuildContext context,
     ToolApprovalService approvalService,
-    String toolCallId,
-  ) {
+    String toolCallId, {
+    String? conversationId,
+  }) {
     final l10n = AppLocalizations.of(context)!;
     final reasonCtrl = TextEditingController();
     showDialog<void>(
@@ -4599,7 +5141,11 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
               final reason = reasonCtrl.text.trim().isEmpty
                   ? null
                   : reasonCtrl.text.trim();
-              approvalService.deny(toolCallId, reason);
+              approvalService.deny(
+                toolCallId,
+                reason: reason,
+                conversationId: conversationId,
+              );
               Navigator.of(ctx).pop();
             },
             child: Text(l10n.toolApprovalDeny),
@@ -4620,19 +5166,18 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
     final showToolResultSummary = context.select<SettingsProvider, bool>(
       (s) => s.showToolResultSummary,
     );
-    final approvalService = context.watch<ToolApprovalService>();
-    ToolApprovalRequest? pendingRequest;
-    if (widget.part.id.isNotEmpty &&
-        approvalService.isPending(widget.part.id)) {
-      pendingRequest = approvalService.pendingRequests[widget.part.id];
-    } else {
-      for (final request in approvalService.pendingRequests.values) {
-        if (request.toolName == widget.part.toolName) {
-          pendingRequest = request;
-          break;
-        }
-      }
-    }
+    final hideToolResultImages = context.select<SettingsProvider, bool>(
+      (s) => s.hideToolResultImages,
+    );
+    final approvalService = context.read<ToolApprovalService>();
+    final pendingRequest = context
+        .select<ToolApprovalService, ToolApprovalRequest?>(
+          (approval) => _matchingApprovalRequest(
+            approval: approval,
+            conversationId: widget.conversationId,
+            toolCallId: widget.part.id,
+          ),
+        );
     final isPendingApproval = pendingRequest != null;
     final approvalRequest = pendingRequest;
 
@@ -4656,8 +5201,9 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
       widget.part.arguments,
       isResult: !widget.part.loading && !isPendingApproval,
     );
-    final label = _Shimmer(
+    final label = ThinkingSheen(
       enabled: widget.part.loading && !_isAskUser,
+      color: fg.strong,
       child: Text(
         title,
         maxLines: 2,
@@ -4690,11 +5236,7 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
         ? _textToSpeechToolText(widget.part.arguments)
         : '';
     final Widget? summaryContent = _isAskUser
-        ? _AskUserInlineBody(
-            part: widget.part,
-            compact: true,
-            onRecoveredAnswer: widget.onRecoveredAnswer,
-          )
+        ? _AskUserInlineBody(part: widget.part, compact: true)
         : ttsText.isNotEmpty
         ? _buildTextToSpeechReplayRow(
             context,
@@ -4723,7 +5265,8 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
               color: fg.body,
             ),
           );
-    final Widget? imageThumbnails = (!_isAskUser && imagePaths.isNotEmpty)
+    final Widget? imageThumbnails =
+        (!_isAskUser && !hideToolResultImages && imagePaths.isNotEmpty)
         ? SizedBox(
             key: ValueKey('tool-image-thumbnails:${widget.part.id}'),
             height: 120,
@@ -4770,6 +5313,7 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
                   context,
                   approvalService,
                   approvalRequest.toolCallId,
+                  conversationId: approvalRequest.conversationId,
                 ),
               ),
               const SizedBox(width: 6),
@@ -4781,15 +5325,17 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
                   context,
                 )!.toolApprovalApprove,
                 builder: (color) => Icon(Lucide.Check, size: 14, color: color),
-                onTap: () =>
-                    approvalService.approve(approvalRequest.toolCallId),
+                onTap: () => approvalService.approve(
+                  approvalRequest.toolCallId,
+                  conversationId: approvalRequest.conversationId,
+                ),
               ),
             ],
           )
         : null;
 
     return _TimelineStepShell(
-      icon: SizedBox(width: 16, height: 16, child: Center(child: icon)),
+      icon: icon,
       label: label,
       isFirst: widget.isFirst,
       isLast: widget.isLast,
@@ -4806,15 +5352,19 @@ class _ChainOfThoughtToolStepState extends State<_ChainOfThoughtToolStep> {
           : Icon(Lucide.ChevronRight, size: 16, color: fg.muted),
       content: content,
       contentVisible: content != null && (!_isAskUser || askUserExpanded),
+      expectContent:
+          widget.part.loading ||
+          isPendingApproval ||
+          _isAskUser ||
+          content != null,
     );
   }
 }
 
 class _ToolCallItem extends StatefulWidget {
-  const _ToolCallItem({required this.part, this.onRecoveredAnswer});
+  const _ToolCallItem({required this.part, required this.conversationId});
   final ToolUIPart part;
-  final Future<void> Function(ToolUIPart part, AskUserResult result)?
-  onRecoveredAnswer;
+  final String conversationId;
 
   @override
   State<_ToolCallItem> createState() => _ToolCallItemState();
@@ -4888,36 +5438,30 @@ class _ToolCallItemState extends State<_ToolCallItem> {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fg = _chatSurfaceForegroundPalette(context);
-    final hasImages = _imagePaths.isNotEmpty;
+    final hideToolResultImages = context.select<SettingsProvider, bool>(
+      (s) => s.hideToolResultImages,
+    );
+    final hasImages = !hideToolResultImages && _imagePaths.isNotEmpty;
     final l10n = AppLocalizations.of(context)!;
     final ttsText = widget.part.toolName == LocalToolNames.textToSpeech
         ? _textToSpeechToolText(widget.part.arguments)
         : '';
 
     if (widget.part.toolName == LocalToolNames.askUser) {
-      return _AskUserToolCard(
-        part: widget.part,
-        onRecoveredAnswer: widget.onRecoveredAnswer,
-      );
+      return _AskUserToolCard(part: widget.part);
     }
 
     // Check if this tool call is pending approval
     final approvalService = context.watch<ToolApprovalService>();
-    final isPendingApproval =
-        widget.part.loading &&
-        approvalService.pendingRequests.values.any(
-          (req) => req.toolName == widget.part.toolName,
-        );
-    // Find the matching approval request
-    String? pendingToolCallId;
-    if (isPendingApproval) {
-      try {
-        final req = approvalService.pendingRequests.values.firstWhere(
-          (req) => req.toolName == widget.part.toolName,
-        );
-        pendingToolCallId = req.toolCallId;
-      } catch (_) {}
-    }
+    final pendingRequest = widget.part.loading
+        ? _matchingApprovalRequest(
+            approval: approvalService,
+            conversationId: widget.conversationId,
+            toolCallId: widget.part.id,
+          )
+        : null;
+    final isPendingApproval = pendingRequest != null;
+    final pendingToolCallId = pendingRequest?.toolCallId;
 
     return IosCardPress(
       borderRadius: BorderRadius.circular(16),
@@ -4975,17 +5519,22 @@ class _ToolCallItemState extends State<_ToolCallItem> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Title: always show tool name; add "waiting" badge when pending
-                      Text(
-                        _titleFor(
-                          context,
-                          widget.part.toolName,
-                          widget.part.arguments,
-                          isResult: !widget.part.loading && !isPendingApproval,
-                        ),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: AppFontWeights.emphasis,
-                          color: isPendingApproval ? fg.accent : fg.strong,
+                      ThinkingSheen(
+                        enabled: widget.part.loading && !isPendingApproval,
+                        color: fg.strong,
+                        child: Text(
+                          _titleFor(
+                            context,
+                            widget.part.toolName,
+                            widget.part.arguments,
+                            isResult:
+                                !widget.part.loading && !isPendingApproval,
+                          ),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: AppFontWeights.emphasis,
+                            color: isPendingApproval ? fg.accent : fg.strong,
+                          ),
                         ),
                       ),
                       // "Waiting for approval" subtitle
@@ -5076,7 +5625,8 @@ class _ToolCallItemState extends State<_ToolCallItem> {
                       onTap: () => _showDenyDialog(
                         context,
                         approvalService,
-                        pendingToolCallId!,
+                        pendingToolCallId,
+                        conversationId: pendingRequest.conversationId,
                       ),
                     ),
                   ),
@@ -5086,7 +5636,10 @@ class _ToolCallItemState extends State<_ToolCallItem> {
                       label: l10n.toolApprovalApprove,
                       color: fg.accent,
                       filled: true,
-                      onTap: () => approvalService.approve(pendingToolCallId!),
+                      onTap: () => approvalService.approve(
+                        pendingToolCallId,
+                        conversationId: pendingRequest.conversationId,
+                      ),
                     ),
                   ),
                 ],
@@ -5123,8 +5676,9 @@ class _ToolCallItemState extends State<_ToolCallItem> {
   void _showDenyDialog(
     BuildContext context,
     ToolApprovalService approvalService,
-    String toolCallId,
-  ) {
+    String toolCallId, {
+    String? conversationId,
+  }) {
     final l10n = AppLocalizations.of(context)!;
     final reasonCtrl = TextEditingController();
     showDialog<void>(
@@ -5146,7 +5700,11 @@ class _ToolCallItemState extends State<_ToolCallItem> {
               final reason = reasonCtrl.text.trim().isEmpty
                   ? null
                   : reasonCtrl.text.trim();
-              approvalService.deny(toolCallId, reason);
+              approvalService.deny(
+                toolCallId,
+                reason: reason,
+                conversationId: conversationId,
+              );
               Navigator.of(ctx).pop();
             },
             child: Text(l10n.toolApprovalDeny),
@@ -5192,11 +5750,9 @@ class _ToolCallItemState extends State<_ToolCallItem> {
 }
 
 class _AskUserToolCard extends StatefulWidget {
-  const _AskUserToolCard({required this.part, this.onRecoveredAnswer});
+  const _AskUserToolCard({required this.part});
 
   final ToolUIPart part;
-  final Future<void> Function(ToolUIPart part, AskUserResult result)?
-  onRecoveredAnswer;
 
   @override
   State<_AskUserToolCard> createState() => _AskUserToolCardState();
@@ -5287,10 +5843,7 @@ class _AskUserToolCardState extends State<_AskUserToolCard> {
             child: expanded
                 ? Padding(
                     padding: const EdgeInsets.only(top: 12),
-                    child: _AskUserInlineBody(
-                      part: widget.part,
-                      onRecoveredAnswer: widget.onRecoveredAnswer,
-                    ),
+                    child: _AskUserInlineBody(part: widget.part),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -5301,16 +5854,10 @@ class _AskUserToolCardState extends State<_AskUserToolCard> {
 }
 
 class _AskUserInlineBody extends StatefulWidget {
-  const _AskUserInlineBody({
-    required this.part,
-    this.compact = false,
-    this.onRecoveredAnswer,
-  });
+  const _AskUserInlineBody({required this.part, this.compact = false});
 
   final ToolUIPart part;
   final bool compact;
-  final Future<void> Function(ToolUIPart part, AskUserResult result)?
-  onRecoveredAnswer;
 
   @override
   State<_AskUserInlineBody> createState() => _AskUserInlineBodyState();
@@ -5438,13 +5985,22 @@ class _AskUserInlineBodyState extends State<_AskUserInlineBody> {
       return;
     }
 
-    final onRecoveredAnswer = widget.onRecoveredAnswer;
+    final action = _RecoveredAskUserAction.maybeOf(context);
+    final onRecoveredAnswer = action?.onSubmit;
     if (onRecoveredAnswer == null || _submittingRecovered) return;
+    final partId = widget.part.id;
+    final conversationId = action!.conversationId;
     setState(() => _submittingRecovered = true);
     try {
       await onRecoveredAnswer(widget.part, AskUserResult.answer(answers));
     } finally {
-      if (mounted) setState(() => _submittingRecovered = false);
+      if (mounted) {
+        final current = _RecoveredAskUserAction.maybeOf(context);
+        if (widget.part.id == partId &&
+            current?.conversationId == conversationId) {
+          setState(() => _submittingRecovered = false);
+        }
+      }
     }
   }
 
@@ -5539,7 +6095,9 @@ class _AskUserInlineBodyState extends State<_AskUserInlineBody> {
             onTap:
                 _canSubmit(questions) &&
                     !_submittingRecovered &&
-                    (pendingRequest != null || widget.onRecoveredAnswer != null)
+                    (pendingRequest != null ||
+                        _RecoveredAskUserAction.maybeOf(context)?.onSubmit !=
+                            null)
                 ? () =>
                       _submitAnswers(askUserService, questions, pendingRequest)
                 : null,
@@ -6275,29 +6833,33 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
           children: [
             ReasoningIcons.thinkingCardIcon(size: 18, color: fg.strong),
             const SizedBox(width: 8),
-            _Shimmer(
+            ThinkingSheen(
               enabled: loading,
-              child: Text(
-                l10n.chatMessageWidgetDeepThinking,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: AppFontWeights.emphasis,
-                  color: fg.strong,
-                ),
+              color: fg.strong,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    l10n.chatMessageWidgetDeepThinking,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: AppFontWeights.emphasis,
+                      color: fg.strong,
+                    ),
+                  ),
+                  if (widget.startAt != null) ...[
+                    const SizedBox(width: 8),
+                    ValueListenableBuilder<int>(
+                      valueListenable: _elapsedTick,
+                      builder: (context, _, __) => Text(
+                        _elapsed(),
+                        style: TextStyle(fontSize: 13, color: fg.medium),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            if (widget.startAt != null)
-              ValueListenableBuilder<int>(
-                valueListenable: _elapsedTick,
-                builder: (context, _, __) => _Shimmer(
-                  enabled: loading,
-                  child: Text(
-                    _elapsed(),
-                    style: TextStyle(fontSize: 13, color: fg.medium),
-                  ),
-                ),
-              ),
             // No header marquee; content area handles scrolling when loading
             const Spacer(),
             AnimatedRotation(
@@ -6434,88 +6996,6 @@ class _ReasoningSectionState extends State<_ReasoningSection> {
             children: [header, if (widget.expanded || isLoading) body],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// Lightweight shimmer effect without external dependency
-class _Shimmer extends StatefulWidget {
-  final Widget child;
-  final bool enabled;
-  const _Shimmer({required this.child, this.enabled = false});
-
-  @override
-  State<_Shimmer> createState() => _ShimmerState();
-}
-
-class _ShimmerState extends State<_Shimmer> with TickerProviderStateMixin {
-  late AnimationController _c;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
-    if (widget.enabled) _c.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _Shimmer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.enabled && !_c.isAnimating) _c.repeat();
-    if (!widget.enabled && _c.isAnimating) _c.stop();
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!widget.enabled) return widget.child;
-    return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, child) {
-          final t = _c.value; // 0..1
-          return ShaderMask(
-            shaderCallback: (rect) {
-              final width = rect.width;
-              final gradientWidth = width * 0.4;
-              final dx = (width + gradientWidth) * t - gradientWidth;
-              final shaderRect = Rect.fromLTWH(
-                -dx,
-                0,
-                width + gradientWidth * 2,
-                rect.height,
-              );
-              return LinearGradient(
-                colors: [
-                  Colors.white.withValues(
-                    alpha: 0.0,
-                  ), // color-gate: ignore (shimmer effect)
-                  Colors.white.withValues(
-                    alpha: 0.35,
-                  ), // color-gate: ignore (shimmer effect)
-                  Colors.white.withValues(
-                    alpha: 0.0,
-                  ), // color-gate: ignore (shimmer effect)
-                ],
-                stops: const [0.0, 0.5, 1.0],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ).createShader(shaderRect);
-            },
-            blendMode: BlendMode.srcATop,
-            child: child,
-          );
-        },
-        child: widget.child,
       ),
     );
   }
