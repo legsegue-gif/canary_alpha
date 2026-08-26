@@ -157,6 +157,15 @@ void main() {
         final token = BackupCancelToken();
         final address = token.cellAddress;
 
+        // 不能靠 native 阻塞让 kill "自然"失效。nanosleep 循环每次被信号
+        // 打断都要回到 Dart 检查条件，那就是一个安全点，Linux 上
+        // Isolate.kill(immediate) 正好趁机生效，isolateExited 变成 true。
+        // macOS 看不出来 —— 那边 sleep 从不返回 Dart，永远到不了安全点。
+        // 用这个 test-only 开关直接跳过 kill，与平台无关；同文件的
+        // sqlite close handshake 测试一直就是这么做的。
+        debugSkipBackupIsolateKill = true;
+        addTearDown(() => debugSkipBackupIsolateKill = false);
+
         await expectLater(
           runBackupIsolate<void, int>(
             body: _nativeSleepIgnoringKill,
@@ -186,6 +195,11 @@ void main() {
         final token = BackupCancelToken();
         addTearDown(token.dispose);
         final started = DateTime.now();
+
+        // 同上：这个测试名里的「ignores kill」必须由开关来保证，
+        // 靠 native 阻塞在 Linux 上做不到。
+        debugSkipBackupIsolateKill = true;
+        addTearDown(() => debugSkipBackupIsolateKill = false);
 
         await expectLater(
           runBackupIsolate<void, int>(
