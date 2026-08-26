@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:Canary/core/services/backup/backup_cancel_token.dart';
 import 'package:Canary/features/backup/backup_restore_error_message.dart';
 import 'package:Canary/l10n/app_localizations.dart';
 
@@ -25,6 +26,13 @@ void main() {
         const FormatException('invalid backup'),
       ),
       'FormatException: invalid backup',
+    );
+    expect(
+      backupRestoreErrorMessage(
+        AppLocalizations.of(context)!,
+        const BackupCancelledException(),
+      ),
+      'Cancelled',
     );
   });
 }
