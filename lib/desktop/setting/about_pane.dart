@@ -197,14 +197,17 @@ class _DesktopAboutPaneState extends State<DesktopAboutPane> {
                   _DeskNavRow(
                     icon: lucide.Lucide.Earth,
                     label: l10n.aboutPageWebsite,
-                    onTap: () => _openUrl('https://github.com/legsegue-gif/canary_alpha'),
+                    onTap: () => _openUrl(
+                      'https://github.com/legsegue-gif/canary_alpha',
+                    ),
                   ),
                   const _DeskRowDivider(),
                   _DeskNavRowSvg(
                     svgAsset: 'assets/icons/github.svg',
                     label: l10n.aboutPageGithub,
-                    onTap: () =>
-                        _openUrl('https://github.com/legsegue-gif/canary_alpha'),
+                    onTap: () => _openUrl(
+                      'https://github.com/legsegue-gif/canary_alpha',
+                    ),
                   ),
                   const _DeskRowDivider(),
                   _DeskNavRow(

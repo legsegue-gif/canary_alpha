@@ -1,6 +1,7 @@
 import '../../providers/settings_provider.dart';
 
-const String _openRouterAppReferer = 'https://github.com/legsegue-gif/canary_alpha';
+const String _openRouterAppReferer =
+    'https://github.com/legsegue-gif/canary_alpha';
 const String _openRouterAppTitle = 'Canary';
 const String _openRouterAppCategories = 'general-chat';
 

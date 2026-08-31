@@ -372,7 +372,9 @@ class SettingsPage extends StatelessWidget {
                 icon: Lucide.Library,
                 label: l10n.settingsPageDocs,
                 onTap: () async {
-                  final uri = Uri.parse('https://github.com/legsegue-gif/canary_alpha');
+                  final uri = Uri.parse(
+                    'https://github.com/legsegue-gif/canary_alpha',
+                  );
                   if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
                   }

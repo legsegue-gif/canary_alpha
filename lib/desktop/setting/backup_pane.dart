@@ -500,18 +500,22 @@ class _DesktopBackupPaneState extends State<DesktopBackupPane> {
                                             onProgress: handle.report,
                                             cancelToken: handle.cancelToken,
                                           ),
-                                      restoreFromItem: (it, mode, handle) async {
-                                        await backupProvider.restoreFromItem(
-                                          it,
-                                          mode: mode,
-                                          onProgress: handle.report,
-                                          cancelToken: handle.cancelToken,
-                                        );
-                                        final msg = backupProvider.message;
-                                        if (msg != null && msg != 'Restored') {
-                                          throw Exception(msg);
-                                        }
-                                      },
+                                      restoreFromItem:
+                                          (it, mode, handle) async {
+                                            await backupProvider
+                                                .restoreFromItem(
+                                                  it,
+                                                  mode: mode,
+                                                  onProgress: handle.report,
+                                                  cancelToken:
+                                                      handle.cancelToken,
+                                                );
+                                            final msg = backupProvider.message;
+                                            if (msg != null &&
+                                                msg != 'Restored') {
+                                              throw Exception(msg);
+                                            }
+                                          },
                                       skippedConversations: () =>
                                           backupProvider.skippedConversations,
                                       deleteAndReload:
@@ -785,18 +789,23 @@ class _DesktopBackupPaneState extends State<DesktopBackupPane> {
                                             onProgress: handle.report,
                                             cancelToken: handle.cancelToken,
                                           ),
-                                      restoreFromItem: (it, mode, handle) async {
-                                        await s3BackupProvider.restoreFromItem(
-                                          it,
-                                          mode: mode,
-                                          onProgress: handle.report,
-                                          cancelToken: handle.cancelToken,
-                                        );
-                                        final msg = s3BackupProvider.message;
-                                        if (msg != null && msg != 'Restored') {
-                                          throw Exception(msg);
-                                        }
-                                      },
+                                      restoreFromItem:
+                                          (it, mode, handle) async {
+                                            await s3BackupProvider
+                                                .restoreFromItem(
+                                                  it,
+                                                  mode: mode,
+                                                  onProgress: handle.report,
+                                                  cancelToken:
+                                                      handle.cancelToken,
+                                                );
+                                            final msg =
+                                                s3BackupProvider.message;
+                                            if (msg != null &&
+                                                msg != 'Restored') {
+                                              throw Exception(msg);
+                                            }
+                                          },
                                       skippedConversations: () =>
                                           s3BackupProvider.skippedConversations,
                                       deleteAndReload:
@@ -821,10 +830,11 @@ class _DesktopBackupPaneState extends State<DesktopBackupPane> {
                                       context,
                                       title: l10n.backupPageBackupNow,
                                       task: (handle) async {
-                                        final ok = await s3BackupProvider.backup(
-                                          onProgress: handle.report,
-                                          cancelToken: handle.cancelToken,
-                                        );
+                                        final ok = await s3BackupProvider
+                                            .backup(
+                                              onProgress: handle.report,
+                                              cancelToken: handle.cancelToken,
+                                            );
                                         if (!ok) {
                                           throw Exception(
                                             s3BackupProvider.message ??
@@ -997,8 +1007,8 @@ class _DesktopBackupPaneState extends State<DesktopBackupPane> {
                       if (error is CherryUnsupportedBackupVersionException) {
                         return l10n
                             .backupPageCherryStudioUnsupportedBackupVersion(
-                          '${error.version}',
-                        );
+                              '${error.version}',
+                            );
                       }
                       return error.toString();
                     },
@@ -1526,14 +1536,12 @@ class _RemoteBackupsDialogState extends State<_RemoteBackupsDialog> {
                             final it = _items[i];
                             return _RemoteItemCard(
                               item: it,
-                              onRestore: () =>
-                                  _chooseRestoreModeAndRun((mode, handle) async {
-                                    await widget.restoreFromItem(
-                                      it,
-                                      mode,
-                                      handle,
-                                    );
-                                  }),
+                              onRestore: () => _chooseRestoreModeAndRun((
+                                mode,
+                                handle,
+                              ) async {
+                                await widget.restoreFromItem(it, mode, handle);
+                              }),
                               onDelete: () async {
                                 final confirm = await showDialog<bool>(
                                   context: context,

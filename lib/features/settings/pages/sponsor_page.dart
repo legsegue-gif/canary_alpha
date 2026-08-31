@@ -102,7 +102,9 @@ class _SponsorPageState extends State<SponsorPage> {
                 icon: Lucide.Heart,
                 label: l10n.sponsorPageAfdianTitle,
                 onTap: () async {
-                  final uri = Uri.parse('https://github.com/legsegue-gif/canary_alpha');
+                  final uri = Uri.parse(
+                    'https://github.com/legsegue-gif/canary_alpha',
+                  );
                   if (!await launchUrl(uri, mode: LaunchMode.platformDefault)) {
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
                   }

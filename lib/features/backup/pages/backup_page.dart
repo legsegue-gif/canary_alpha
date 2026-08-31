@@ -637,11 +637,13 @@ class _BackupPageState extends State<BackupPage> {
                                                   item,
                                                   mode: mode,
                                                   onProgress: handle.report,
-                                                  cancelToken: handle.cancelToken,
+                                                  cancelToken:
+                                                      handle.cancelToken,
                                                 ),
                                               );
                                             } catch (e) {
-                                              if (e is BackupCancelledException) {
+                                              if (e
+                                                  is BackupCancelledException) {
                                                 return;
                                               }
                                               if (!context.mounted) return;
@@ -1059,15 +1061,18 @@ class _BackupPageState extends State<BackupPage> {
                                             try {
                                               await _runWithImportingOverlay(
                                                 context,
-                                                (handle) => s3Vm.restoreFromItem(
-                                                  item,
-                                                  mode: mode,
-                                                  onProgress: handle.report,
-                                                  cancelToken: handle.cancelToken,
-                                                ),
+                                                (handle) =>
+                                                    s3Vm.restoreFromItem(
+                                                      item,
+                                                      mode: mode,
+                                                      onProgress: handle.report,
+                                                      cancelToken:
+                                                          handle.cancelToken,
+                                                    ),
                                               );
                                             } catch (e) {
-                                              if (e is BackupCancelledException) {
+                                              if (e
+                                                  is BackupCancelledException) {
                                                 return;
                                               }
                                               if (!context.mounted) return;
