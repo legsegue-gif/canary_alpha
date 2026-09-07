@@ -810,6 +810,7 @@ class _MessageListViewState extends State<MessageListView> {
           toolName: toolParts[i].toolName,
           arguments: toolParts[i].arguments,
           content: toolParts[i].content,
+          metadata: toolParts[i].metadata,
           loading: toolParts[i].loading,
           memoToken: identityHashCode(toolParts[i]),
         ),
@@ -943,6 +944,7 @@ class _MessageListViewState extends State<MessageListView> {
           toolName: tool.toolName,
           arguments: tool.arguments,
           content: tool.content,
+          metadata: tool.metadata,
           showToolResultSummary: settings.showToolResultSummary,
           hideToolResultImages: settings.hideToolResultImages,
           pendingApproval: _isPendingApproval(
@@ -1906,6 +1908,7 @@ class _MessageListViewState extends State<MessageListView> {
               completionTokens: data.completionTokens,
               cachedTokens: data.cachedTokens,
               durationMs: data.durationMs,
+              retryStatus: data.retryStatus,
             )
           : data;
     }
@@ -2222,6 +2225,7 @@ class _MessageListViewState extends State<MessageListView> {
             contentSplitOffsets: painted.contentSplitOffsets,
             reasoningCountAtSplit: painted.reasoningCountAtSplit,
             toolCountAtSplit: painted.toolCountAtSplit,
+            retryStatus: painted.retryStatus,
           ),
         );
       },
@@ -2250,6 +2254,7 @@ class _MessageListViewState extends State<MessageListView> {
     List<int>? contentSplitOffsets,
     List<int>? reasoningCountAtSplit,
     List<int>? toolCountAtSplit,
+    RetryStatus? retryStatus,
   }) {
     final currentIdx = availableVersions.indexOf(selectedVersion);
     return ChatMessageWidget(
@@ -2294,6 +2299,7 @@ class _MessageListViewState extends State<MessageListView> {
           isProcessingFiles ||
           (widget.isPinnedIndicatorActive &&
               (message.id == widget.pinnedStreamingMessageId)),
+      retryStatus: retryStatus,
       reasoningText: (message.role == 'assistant') ? (r?.text ?? '') : null,
       reasoningExpanded: (message.role == 'assistant')
           ? (r?.expanded ?? false)

@@ -20,8 +20,10 @@ import '../services/learning_mode_store.dart';
 import '../models/api_keys.dart';
 import '../models/backup.dart';
 import '../models/compress_context_options.dart';
+import '../models/auto_retry_options.dart';
 import '../models/provider_group.dart';
 import '../services/haptics.dart';
+import '../services/api/retry_policy.dart';
 import '../services/screen_wakelock.dart';
 import '../../utils/app_directories.dart';
 import '../../utils/sandbox_path_resolver.dart';
@@ -36,6 +38,8 @@ import '../services/memory/memory_trace.dart';
 import '../../theme/palettes.dart';
 import '../../theme/custom_theme.dart';
 import '../../theme/chat_bubble_style.dart';
+import '../models/tool_schema_override.dart';
+import '../services/app_exit_flush.dart';
 
 // Desktop: topic list position
 enum DesktopTopicPosition { left, right }
@@ -78,6 +82,7 @@ class SettingsProvider extends ChangeNotifier {
     'DeepSeek',
     'AIhubmix',
     '随想AI中转站',
+    'MaruCode',
     'Aliyun',
     'Zhipu AI',
     'Claude',
@@ -91,13 +96,18 @@ class SettingsProvider extends ChangeNotifier {
   static const String _providerConfigsKey = 'provider_configs_v1';
   static const String _pinnedModelsKey = 'pinned_models_v1';
   static const String _selectedModelKey = 'selected_model_v1';
+  static const String _perChatModelEnabledKey = 'per_chat_model_enabled_v1';
   static const String _titleModelKey = 'title_model_v1';
+  static const String _titleGenerationEnabledKey =
+      'title_generation_enabled_v1';
   static const String _titlePromptKey = 'title_prompt_v1';
   static const String _ocrModelKey = 'ocr_model_v1';
   static const String _ocrPromptKey = 'ocr_prompt_v1';
   static const String _summaryModelKey = 'summary_model_v1';
   static const String _summaryPromptKey = 'summary_prompt_v1';
   static const String _suggestionModelKey = 'suggestion_model_v1';
+  static const String _suggestionGenerationEnabledKey =
+      'suggestion_generation_enabled_v1';
   static const String _suggestionPromptKey = 'suggestion_prompt_v1';
   static const String _suggestionInsertOnTapOnlyKey =
       'suggestion_insert_on_tap_only_v1';
@@ -198,6 +208,8 @@ class SettingsProvider extends ChangeNotifier {
       'display_show_regenerate_confirm_dialog_v1';
   static const String _chatForkKeepMessageVersionsKey =
       'chat_fork_keep_message_versions_v1';
+  static const String _chatEditAssistantKeepThinkingToolCardsKey =
+      'chat_edit_assistant_keep_thinking_tool_cards_v1';
   static const String _displayShowMessageNavKey = 'display_show_message_nav_v1';
   static const String _displayDesktopMessageNavButtonsModeKey =
       'display_desktop_message_nav_buttons_mode_v1';
@@ -272,6 +284,8 @@ class SettingsProvider extends ChangeNotifier {
       'image_compress_custom_quality_v1';
   static const String _imageCompressTransparentEnabledKey =
       'image_compress_transparent_enabled_v1';
+  static const String _sendMarkdownImageLinksAsImagesKey =
+      'send_markdown_image_links_as_images_v1';
   static const String _displayMobileCodeBlockWrapKey =
       'display_mobile_code_block_wrap_v1';
   static const String _displayAutoCollapseCodeBlockKey =
@@ -286,12 +300,21 @@ class SettingsProvider extends ChangeNotifier {
       'display_desktop_minimize_to_tray_on_close_v1';
   static const String _displayUsePureBackgroundKey =
       'display_use_pure_background_v1';
+  static const String _displayUseLayeredSurfacesKey =
+      'display_use_layered_surfaces_v1';
+  static const String _displayUseLayeredSheetTilesKey =
+      'display_use_layered_sheet_tiles_v1';
+  static const String _displayAssistantBubbleFitContentKey =
+      'display_assistant_bubble_fit_content_v1';
+  static const String _displayAssistantBubbleSplitParagraphsKey =
+      'display_assistant_bubble_split_paragraphs_v1';
   static const String _displayChatMessageBackgroundStyleKey =
       'display_chat_message_background_style_v1';
   static const String _chatBubbleStyleOverridesKey =
       'chat_bubble_style_overrides_v1';
   static const String _userChatBubbleStyleOverridesKey =
       'chat_bubble_style_overrides_user_v1';
+  static const String _toolSchemaOverridesKey = 'tool_schema_overrides_v1';
   static const String _mobileAssistantEditTabOrderKey =
       'mobile_assistant_edit_tab_order_v1';
   static const String _mobileAssistantEditTabHiddenKey =
@@ -368,6 +391,7 @@ class SettingsProvider extends ChangeNotifier {
   static const String _globalProxyBypassKey = 'global_proxy_bypass_v1';
   static const String _defaultGlobalProxyBypassRules =
       'localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1';
+  static const String _autoRetryOptionsKey = 'auto_retry_options';
   // TTS services (network)
   static const String _ttsServicesKey = 'tts_services_v1';
   static const String _ttsSelectedServiceIdKey = 'tts_selected_service_id_v1';
@@ -491,6 +515,22 @@ class SettingsProvider extends ChangeNotifier {
   bool _usePureBackground = false;
   bool get usePureBackground => _usePureBackground;
 
+  // Experimental HCT surface ladder. Default off = HEAD formulas.
+  bool _useLayeredSurfaces = false;
+  bool get useLayeredSurfaces => _useLayeredSurfaces;
+
+  // When off, action tiles inside sheets stay the same color as the sheet.
+  bool _useLayeredSheetTiles = false;
+  bool get useLayeredSheetTiles => _useLayeredSheetTiles;
+
+  // When on, assistant bubbles hug their text instead of spanning the row.
+  bool _assistantBubbleFitContent = false;
+  bool get assistantBubbleFitContent => _assistantBubbleFitContent;
+
+  // When on, blank lines split assistant text into one bubble per paragraph.
+  bool _assistantBubbleSplitParagraphs = false;
+  bool get assistantBubbleSplitParagraphs => _assistantBubbleSplitParagraphs;
+
   // Desktop UI persisted state
   double _desktopSidebarWidth = 240;
   bool _desktopSidebarOpen = true;
@@ -550,7 +590,10 @@ class SettingsProvider extends ChangeNotifier {
         final rawOv = cfg.modelOverrides[modelId];
         final ov = rawOv is Map ? rawOv.cast<String, dynamic>() : null;
         final modelForCheck = resolveApiModelIdOverride(ov, modelId);
-        return !_isDeepSeekClaudeCompatible(cfg, modelForCheck) &&
+        return !ProviderConfig.isDeepSeekClaudeCompatible(
+              modelForCheck,
+              config: cfg,
+            ) &&
             _claudeSupportsXhighReasoning(modelForCheck);
       case ProviderKind.google:
         return false;
@@ -576,7 +619,10 @@ class SettingsProvider extends ChangeNotifier {
         final rawOv = cfg.modelOverrides[modelId];
         final ov = rawOv is Map ? rawOv.cast<String, dynamic>() : null;
         final modelForCheck = resolveApiModelIdOverride(ov, modelId);
-        return _isDeepSeekClaudeCompatible(cfg, modelForCheck) ||
+        return ProviderConfig.isDeepSeekClaudeCompatible(
+              modelForCheck,
+              config: cfg,
+            ) ||
             _claudeSupportsMaxReasoning(modelForCheck);
     }
   }
@@ -650,17 +696,6 @@ class SettingsProvider extends ChangeNotifier {
     return false;
   }
 
-  bool _isDeepSeekClaudeCompatible(ProviderConfig cfg, String modelId) {
-    final lowerModelId = modelId.trim().toLowerCase();
-    if (lowerModelId.contains('deepseek')) return true;
-    final baseUrl = cfg.baseUrl.trim().toLowerCase();
-    final providerId = cfg.id.trim().toLowerCase();
-    final providerName = cfg.name.trim().toLowerCase();
-    return baseUrl.contains('api.deepseek.com') ||
-        providerId.contains('deepseek') ||
-        providerName.contains('deepseek');
-  }
-
   // Explicitly ensure a provider config exists in memory (without persisting to storage).
   // Useful for seeding first-run defaults.
   ProviderConfig ensureProviderConfig(String key, {String? defaultName}) {
@@ -706,6 +741,9 @@ class SettingsProvider extends ChangeNotifier {
   String get globalProxyUsername => _globalProxyUsername;
   String get globalProxyPassword => _globalProxyPassword;
   String get globalProxyBypass => _globalProxyBypass;
+
+  AutoRetryOptions _autoRetry = const AutoRetryOptions.defaults();
+  AutoRetryOptions get autoRetryOptions => _autoRetry;
 
   int _appLaunchCount = 0;
   int get appLaunchCount => _appLaunchCount;
@@ -820,6 +858,8 @@ class SettingsProvider extends ChangeNotifier {
         _titleModelId = parts.sublist(1).join('::');
       }
     }
+    _perChatModelEnabled = prefs.getBool(_perChatModelEnabledKey) ?? false;
+    _titleGenerationEnabled = prefs.getBool(_titleGenerationEnabledKey) ?? true;
     // load title prompt
     final tp = prefs.getString(_titlePromptKey);
     _titlePrompt = (tp == null || tp.trim().isEmpty) ? defaultTitlePrompt : tp;
@@ -882,6 +922,8 @@ class SettingsProvider extends ChangeNotifier {
         _suggestionModelId = parts.sublist(1).join('::');
       }
     }
+    _suggestionGenerationEnabled =
+        prefs.getBool(_suggestionGenerationEnabledKey) ?? suggestionSel != null;
     // load chat suggestion prompt
     final suggestionp = prefs.getString(_suggestionPromptKey);
     _suggestionPrompt = (suggestionp == null || suggestionp.trim().isEmpty)
@@ -1060,6 +1102,8 @@ class SettingsProvider extends ChangeNotifier {
         prefs.getBool(_displayShowRegenerateConfirmDialogKey) ?? true;
     _forkKeepMessageVersions =
         prefs.getBool(_chatForkKeepMessageVersionsKey) ?? false;
+    _keepThinkingAndToolCardsWhenEditingAssistant =
+        prefs.getBool(_chatEditAssistantKeepThinkingToolCardsKey) ?? false;
     _showMessageNavButtons = prefs.getBool(_displayShowMessageNavKey) ?? true;
     _mobileMessageNavButtonsMode = _parseMobileMessageNavButtonsMode(
       prefs.getString(_displayMobileMessageNavButtonsModeKey),
@@ -1166,6 +1210,13 @@ class SettingsProvider extends ChangeNotifier {
     } else {
       _usePureBackground = pureBgPref;
     }
+    _useLayeredSurfaces = prefs.getBool(_displayUseLayeredSurfacesKey) ?? false;
+    _useLayeredSheetTiles =
+        prefs.getBool(_displayUseLayeredSheetTilesKey) ?? false;
+    _assistantBubbleFitContent =
+        prefs.getBool(_displayAssistantBubbleFitContentKey) ?? false;
+    _assistantBubbleSplitParagraphs =
+        prefs.getBool(_displayAssistantBubbleSplitParagraphsKey) ?? false;
     // display: markdown/math rendering
     _enableDollarLatex = prefs.getBool(_displayEnableDollarLatexKey) ?? true;
     _enableMathRendering =
@@ -1188,6 +1239,8 @@ class SettingsProvider extends ChangeNotifier {
         (prefs.getInt(_imageCompressCustomQualityKey) ?? 85).clamp(10, 100);
     _imageCompressTransparentEnabled =
         prefs.getBool(_imageCompressTransparentEnabledKey) ?? false;
+    _sendMarkdownImageLinksAsImages =
+        prefs.getBool(_sendMarkdownImageLinksAsImagesKey) ?? false;
     _mobileCodeBlockWrap =
         prefs.getBool(_displayMobileCodeBlockWrapKey) ?? false;
     _autoCollapseCodeBlock =
@@ -1289,6 +1342,9 @@ class SettingsProvider extends ChangeNotifier {
         // Keep null so a corrupt user key still follows assistant.
       }
     }
+    _toolSchemaOverrides = _decodeToolSchemaOverrides(
+      prefs.getString(_toolSchemaOverridesKey),
+    );
     _mobileAssistantEditTabOrder = List.unmodifiable(
       prefs.getStringList(_mobileAssistantEditTabOrderKey) ?? const <String>[],
     );
@@ -1381,6 +1437,17 @@ class SettingsProvider extends ChangeNotifier {
     } else {
       _globalProxyBypass = bypass;
     }
+
+    _autoRetry = const AutoRetryOptions.defaults();
+    final autoRetryStr = prefs.getString(_autoRetryOptionsKey);
+    if (autoRetryStr != null && autoRetryStr.isNotEmpty) {
+      try {
+        _autoRetry = AutoRetryOptions.fromJson(
+          jsonDecode(autoRetryStr) as Map<String, dynamic>,
+        );
+      } catch (_) {}
+    }
+    AutoRetryConfig.current = _autoRetry;
 
     // load network TTS services
     try {
@@ -1576,6 +1643,13 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = _preferences;
     await prefs.setString(_globalProxyBypassKey, _globalProxyBypass);
+  }
+
+  Future<void> setAutoRetryOptions(AutoRetryOptions v) async {
+    _autoRetry = v;
+    AutoRetryConfig.current = v;
+    notifyListeners();
+    await _preferences.setString(_autoRetryOptionsKey, jsonEncode(v.toJson()));
   }
 
   // Apply global proxy to Dart IO layer; provider-level proxies take precedence at call sites.
@@ -2587,6 +2661,36 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setBool(_displayUsePureBackgroundKey, v);
   }
 
+  Future<void> setUseLayeredSurfaces(bool v) async {
+    if (_useLayeredSurfaces == v) return;
+    _useLayeredSurfaces = v;
+    notifyListeners();
+    final prefs = _preferences;
+    await prefs.setBool(_displayUseLayeredSurfacesKey, v);
+  }
+
+  Future<void> setAssistantBubbleFitContent(bool v) async {
+    if (_assistantBubbleFitContent == v) return;
+    _assistantBubbleFitContent = v;
+    notifyListeners();
+    await _preferences.setBool(_displayAssistantBubbleFitContentKey, v);
+  }
+
+  Future<void> setAssistantBubbleSplitParagraphs(bool v) async {
+    if (_assistantBubbleSplitParagraphs == v) return;
+    _assistantBubbleSplitParagraphs = v;
+    notifyListeners();
+    await _preferences.setBool(_displayAssistantBubbleSplitParagraphsKey, v);
+  }
+
+  Future<void> setUseLayeredSheetTiles(bool v) async {
+    if (_useLayeredSheetTiles == v) return;
+    _useLayeredSheetTiles = v;
+    notifyListeners();
+    final prefs = _preferences;
+    await prefs.setBool(_displayUseLayeredSheetTilesKey, v);
+  }
+
   void _loadCustomThemes(BusinessPreferences prefs) {
     final raw = prefs.getStringList(_customThemesKey) ?? const <String>[];
     final themes = <CustomTheme>[];
@@ -2796,6 +2900,154 @@ class SettingsProvider extends ChangeNotifier {
       _chatBubbleStyleOverridesKey,
       jsonEncode(value.toJson()),
     );
+  }
+
+  static const Duration toolSchemaOverridePersistDebounce = Duration(
+    milliseconds: 300,
+  );
+
+  Map<String, ToolSchemaOverride> _toolSchemaOverrides =
+      const <String, ToolSchemaOverride>{};
+  Map<String, ToolSchemaOverride> get toolSchemaOverrides =>
+      Map<String, ToolSchemaOverride>.unmodifiable(_toolSchemaOverrides);
+
+  Timer? _toolSchemaOverridePersistTimer;
+  bool _toolSchemaOverridePersistDirty = false;
+  Future<void> Function()? _toolSchemaOverrideExitFlushHandler;
+
+  bool _applyToolSchemaOverrideInMemory(
+    String toolName,
+    ToolSchemaOverride value,
+  ) {
+    if (toolName.isEmpty) return false;
+    final next = Map<String, ToolSchemaOverride>.from(_toolSchemaOverrides);
+    if (value.isEmpty) {
+      if (!next.containsKey(toolName)) return false;
+      next.remove(toolName);
+    } else {
+      if (next[toolName] == value) return false;
+      next[toolName] = value;
+    }
+    _toolSchemaOverrides = next;
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> setToolSchemaOverride(
+    String toolName,
+    ToolSchemaOverride value,
+  ) async {
+    if (!_applyToolSchemaOverrideInMemory(toolName, value)) return;
+    await _persistToolSchemaOverridesNow();
+  }
+
+  /// In-memory write used by live editors. SQLite persist is debounced and
+  /// must be flushed on blur, tool switch, pane close, or process exit.
+  void setToolSchemaOverrideLive(String toolName, ToolSchemaOverride value) {
+    if (!_applyToolSchemaOverrideInMemory(toolName, value)) return;
+    _scheduleDebouncedToolSchemaOverridePersist();
+  }
+
+  Future<void> flushPendingToolSchemaOverridePersist() async {
+    _toolSchemaOverridePersistTimer?.cancel();
+    _toolSchemaOverridePersistTimer = null;
+    if (!_toolSchemaOverridePersistDirty) return;
+    await _persistToolSchemaOverrides();
+  }
+
+  Future<void> resetToolSchemaOverride(String toolName) async {
+    await setToolSchemaOverride(toolName, const ToolSchemaOverride());
+  }
+
+  Future<void> resetAllToolSchemaOverrides() async {
+    _cancelDebouncedToolSchemaOverridePersist();
+    if (_toolSchemaOverrides.isEmpty) return;
+    _toolSchemaOverrides = const <String, ToolSchemaOverride>{};
+    notifyListeners();
+    await _preferences.remove(_toolSchemaOverridesKey);
+  }
+
+  void _scheduleDebouncedToolSchemaOverridePersist() {
+    _toolSchemaOverridePersistDirty = true;
+    _ensureToolSchemaOverrideExitFlushRegistered();
+    _toolSchemaOverridePersistTimer?.cancel();
+    _toolSchemaOverridePersistTimer = Timer(
+      toolSchemaOverridePersistDebounce,
+      () {
+        unawaited(_persistToolSchemaOverrides());
+      },
+    );
+  }
+
+  void _cancelDebouncedToolSchemaOverridePersist() {
+    _toolSchemaOverridePersistTimer?.cancel();
+    _toolSchemaOverridePersistTimer = null;
+    _toolSchemaOverridePersistDirty = false;
+  }
+
+  Future<void> _persistToolSchemaOverridesNow() async {
+    _toolSchemaOverridePersistTimer?.cancel();
+    _toolSchemaOverridePersistTimer = null;
+    await _persistToolSchemaOverrides();
+  }
+
+  void _ensureToolSchemaOverrideExitFlushRegistered() {
+    if (_toolSchemaOverrideExitFlushHandler != null) return;
+    _toolSchemaOverrideExitFlushHandler = flushPendingToolSchemaOverridePersist;
+    AppExitFlush.register(_toolSchemaOverrideExitFlushHandler!);
+  }
+
+  Future<void> _persistToolSchemaOverrides() async {
+    _toolSchemaOverridePersistDirty = false;
+    if (_toolSchemaOverrides.isEmpty) {
+      await _preferences.remove(_toolSchemaOverridesKey);
+      return;
+    }
+    await _preferences.setString(
+      _toolSchemaOverridesKey,
+      jsonEncode({
+        for (final e in _toolSchemaOverrides.entries) e.key: e.value.toJson(),
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    _toolSchemaOverridePersistTimer?.cancel();
+    _toolSchemaOverridePersistTimer = null;
+    if (_toolSchemaOverridePersistDirty) {
+      unawaited(_persistToolSchemaOverrides());
+    }
+    final handler = _toolSchemaOverrideExitFlushHandler;
+    if (handler != null) {
+      AppExitFlush.unregister(handler);
+      _toolSchemaOverrideExitFlushHandler = null;
+    }
+    super.dispose();
+  }
+
+  static Map<String, ToolSchemaOverride> _decodeToolSchemaOverrides(
+    String? raw,
+  ) {
+    if (raw == null || raw.isEmpty) return const <String, ToolSchemaOverride>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return const <String, ToolSchemaOverride>{};
+      final out = <String, ToolSchemaOverride>{};
+      for (final entry in decoded.entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final override = ToolSchemaOverride.fromJson(
+          Map<String, dynamic>.from(value),
+        );
+        if (!override.isEmpty) {
+          out['${entry.key}'] = override;
+        }
+      }
+      return out;
+    } catch (_) {
+      return const <String, ToolSchemaOverride>{};
+    }
   }
 
   List<String> _mobileAssistantEditTabOrder = const <String>[];
@@ -3125,7 +3377,9 @@ class SettingsProvider extends ChangeNotifier {
     if (_titleModelProvider == providerKey) {
       _titleModelProvider = null;
       _titleModelId = null;
+      _titleGenerationEnabled = false;
       await prefs.remove(_titleModelKey);
+      await prefs.setBool(_titleGenerationEnabledKey, false);
       changed = true;
     }
     if (_translateModelProvider == providerKey) {
@@ -3151,7 +3405,9 @@ class SettingsProvider extends ChangeNotifier {
     if (_suggestionModelProvider == providerKey) {
       _suggestionModelProvider = null;
       _suggestionModelId = null;
+      _suggestionGenerationEnabled = false;
       await prefs.remove(_suggestionModelKey);
+      await prefs.setBool(_suggestionGenerationEnabledKey, false);
       changed = true;
     }
     if (_compressModelProvider == providerKey) {
@@ -3186,7 +3442,9 @@ class SettingsProvider extends ChangeNotifier {
     if (_titleModelProvider == providerKey && _titleModelId == modelId) {
       _titleModelProvider = null;
       _titleModelId = null;
+      _titleGenerationEnabled = false;
       await prefs.remove(_titleModelKey);
+      await prefs.setBool(_titleGenerationEnabledKey, false);
       changed = true;
     }
     if (_translateModelProvider == providerKey &&
@@ -3214,7 +3472,9 @@ class SettingsProvider extends ChangeNotifier {
         _suggestionModelId == modelId) {
       _suggestionModelProvider = null;
       _suggestionModelId = null;
+      _suggestionGenerationEnabled = false;
       await prefs.remove(_suggestionModelKey);
+      await prefs.setBool(_suggestionGenerationEnabledKey, false);
       changed = true;
     }
     if (_compressModelProvider == providerKey && _compressModelId == modelId) {
@@ -3258,7 +3518,9 @@ class SettingsProvider extends ChangeNotifier {
     if (_titleModelProvider == key) {
       _titleModelProvider = null;
       _titleModelId = null;
+      _titleGenerationEnabled = false;
       await prefs.remove(_titleModelKey);
+      await prefs.setBool(_titleGenerationEnabledKey, false);
     }
     if (_translateModelProvider == key) {
       _translateModelProvider = null;
@@ -3280,7 +3542,9 @@ class SettingsProvider extends ChangeNotifier {
     if (_suggestionModelProvider == key) {
       _suggestionModelProvider = null;
       _suggestionModelId = null;
+      _suggestionGenerationEnabled = false;
       await prefs.remove(_suggestionModelKey);
+      await prefs.setBool(_suggestionGenerationEnabledKey, false);
     }
     if (_compressModelProvider == key) {
       _compressModelProvider = null;
@@ -3350,9 +3614,25 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.remove(_selectedModelKey);
   }
 
+  // When on, picking a model in the chat pins it to that conversation only.
+  // When off, the pick rewrites the current assistant's model, so every chat
+  // under that assistant follows it. Conversation pins are kept either way and
+  // simply ignored while this is off, so toggling back restores them.
+  bool _perChatModelEnabled = false;
+  bool get perChatModelEnabled => _perChatModelEnabled;
+
+  Future<void> setPerChatModelEnabled(bool value) async {
+    if (_perChatModelEnabled == value) return;
+    _perChatModelEnabled = value;
+    notifyListeners();
+    final prefs = _preferences;
+    await prefs.setBool(_perChatModelEnabledKey, value);
+  }
+
   // Title model and prompt
   String? _titleModelProvider;
   String? _titleModelId;
+  bool _titleGenerationEnabled = true;
   String? get titleModelProvider => _titleModelProvider;
   String? get titleModelId => _titleModelId;
   String? get titleModelKey =>
@@ -3360,9 +3640,7 @@ class SettingsProvider extends ChangeNotifier {
       ? '${_titleModelProvider!}::${_titleModelId!}'
       : null;
 
-  /// Title summarization is opt-in: unset model means the feature is off.
-  bool get isTitleGenerationEnabled =>
-      _titleModelProvider != null && _titleModelId != null;
+  bool get isTitleGenerationEnabled => _titleGenerationEnabled;
 
   static const String defaultTitlePrompt =
       '''I will give you some dialogue content in the `<content>` block.
@@ -3383,17 +3661,31 @@ You need to summarize the conversation between user and assistant into a short t
   Future<void> setTitleModel(String providerKey, String modelId) async {
     _titleModelProvider = providerKey;
     _titleModelId = modelId;
+    _titleGenerationEnabled = true;
     notifyListeners();
     final prefs = _preferences;
     await prefs.setString(_titleModelKey, '$providerKey::$modelId');
+    await prefs.setBool(_titleGenerationEnabledKey, true);
   }
 
   Future<void> resetTitleModel() async {
     _titleModelProvider = null;
     _titleModelId = null;
+    _titleGenerationEnabled = true;
     notifyListeners();
     final prefs = _preferences;
     await prefs.remove(_titleModelKey);
+    await prefs.setBool(_titleGenerationEnabledKey, true);
+  }
+
+  Future<void> disableTitleGeneration() async {
+    _titleModelProvider = null;
+    _titleModelId = null;
+    _titleGenerationEnabled = false;
+    notifyListeners();
+    final prefs = _preferences;
+    await prefs.remove(_titleModelKey);
+    await prefs.setBool(_titleGenerationEnabledKey, false);
   }
 
   Future<void> setTitlePrompt(String prompt) async {
@@ -3595,11 +3887,14 @@ Generate or update a brief summary of the user's questions and intentions.
   Future<void> resetSummaryPrompt() async =>
       setSummaryPrompt(defaultSummaryPrompt);
 
-  // Chat suggestion model and prompt. Null model means the feature is disabled.
+  // Chat suggestion model and prompt.
+  // A null model follows the current chat when the feature is enabled.
   String? _suggestionModelProvider;
   String? _suggestionModelId;
+  bool _suggestionGenerationEnabled = false;
   String? get suggestionModelProvider => _suggestionModelProvider;
   String? get suggestionModelId => _suggestionModelId;
+  bool get isSuggestionGenerationEnabled => _suggestionGenerationEnabled;
   String? get suggestionModelKey =>
       (_suggestionModelProvider != null && _suggestionModelId != null)
       ? '${_suggestionModelProvider!}::${_suggestionModelId!}'
@@ -3629,17 +3924,31 @@ Rules:
   Future<void> setSuggestionModel(String providerKey, String modelId) async {
     _suggestionModelProvider = providerKey;
     _suggestionModelId = modelId;
+    _suggestionGenerationEnabled = true;
     notifyListeners();
     final prefs = _preferences;
     await prefs.setString(_suggestionModelKey, '$providerKey::$modelId');
+    await prefs.setBool(_suggestionGenerationEnabledKey, true);
   }
 
   Future<void> resetSuggestionModel() async {
     _suggestionModelProvider = null;
     _suggestionModelId = null;
+    _suggestionGenerationEnabled = true;
     notifyListeners();
     final prefs = _preferences;
     await prefs.remove(_suggestionModelKey);
+    await prefs.setBool(_suggestionGenerationEnabledKey, true);
+  }
+
+  Future<void> disableSuggestionGeneration() async {
+    _suggestionModelProvider = null;
+    _suggestionModelId = null;
+    _suggestionGenerationEnabled = false;
+    notifyListeners();
+    final prefs = _preferences;
+    await prefs.remove(_suggestionModelKey);
+    await prefs.setBool(_suggestionGenerationEnabledKey, false);
   }
 
   Future<void> setSuggestionPrompt(String prompt) async {
@@ -4486,6 +4795,16 @@ Requirements:
     await _preferences.setBool(_chatForkKeepMessageVersionsKey, v);
   }
 
+  bool _keepThinkingAndToolCardsWhenEditingAssistant = false;
+  bool get keepThinkingAndToolCardsWhenEditingAssistant =>
+      _keepThinkingAndToolCardsWhenEditingAssistant;
+  Future<void> setKeepThinkingAndToolCardsWhenEditingAssistant(bool v) async {
+    if (_keepThinkingAndToolCardsWhenEditingAssistant == v) return;
+    _keepThinkingAndToolCardsWhenEditingAssistant = v;
+    notifyListeners();
+    await _preferences.setBool(_chatEditAssistantKeepThinkingToolCardsKey, v);
+  }
+
   // Display: show message navigation button
   bool _showMessageNavButtons = true;
   bool get showMessageNavButtons => _showMessageNavButtons;
@@ -4932,6 +5251,18 @@ Requirements:
     await _preferences.setBool(_imageCompressTransparentEnabledKey, value);
   }
 
+  // When off, `![alt](url)` in message text stays literal text instead of
+  // being turned into a multimodal image part. Explicit attachments are
+  // unaffected: they travel as media paths, not Markdown.
+  bool _sendMarkdownImageLinksAsImages = false;
+  bool get sendMarkdownImageLinksAsImages => _sendMarkdownImageLinksAsImages;
+  Future<void> setSendMarkdownImageLinksAsImages(bool value) async {
+    if (_sendMarkdownImageLinksAsImages == value) return;
+    _sendMarkdownImageLinksAsImages = value;
+    notifyListeners();
+    await _preferences.setBool(_sendMarkdownImageLinksAsImagesKey, value);
+  }
+
   ImageCompressConfig resolveImageCompressConfig() {
     return switch (_imageUploadQuality) {
       ImageUploadQuality.original => ImageCompressConfig(
@@ -5369,14 +5700,17 @@ Requirements:
     copy._pinnedModels.addAll(_pinnedModels);
     copy._currentModelProvider = _currentModelProvider;
     copy._currentModelId = _currentModelId;
+    copy._perChatModelEnabled = _perChatModelEnabled;
     copy._titleModelProvider = _titleModelProvider;
     copy._titleModelId = _titleModelId;
+    copy._titleGenerationEnabled = _titleGenerationEnabled;
     copy._titlePrompt = _titlePrompt;
     copy._summaryModelProvider = _summaryModelProvider;
     copy._summaryModelId = _summaryModelId;
     copy._summaryPrompt = _summaryPrompt;
     copy._suggestionModelProvider = _suggestionModelProvider;
     copy._suggestionModelId = _suggestionModelId;
+    copy._suggestionGenerationEnabled = _suggestionGenerationEnabled;
     copy._suggestionPrompt = _suggestionPrompt;
     copy._insertSuggestionOnTapOnly = _insertSuggestionOnTapOnly;
     copy._compressModelProvider = _compressModelProvider;
@@ -5446,6 +5780,8 @@ Requirements:
     copy._regenerateDeleteTrailingMessages = _regenerateDeleteTrailingMessages;
     copy._showRegenerateConfirmDialog = _showRegenerateConfirmDialog;
     copy._forkKeepMessageVersions = _forkKeepMessageVersions;
+    copy._keepThinkingAndToolCardsWhenEditingAssistant =
+        _keepThinkingAndToolCardsWhenEditingAssistant;
     copy._showMessageNavButtons = _showMessageNavButtons;
     copy._mobileMessageNavButtonsMode = _mobileMessageNavButtonsMode;
     copy._useNewAssistantAvatarUx = _useNewAssistantAvatarUx;
@@ -5498,9 +5834,16 @@ Requirements:
     copy._desktopShowTray = _desktopShowTray;
     copy._desktopMinimizeToTrayOnClose = _desktopMinimizeToTrayOnClose;
     copy._usePureBackground = _usePureBackground;
+    copy._useLayeredSurfaces = _useLayeredSurfaces;
+    copy._useLayeredSheetTiles = _useLayeredSheetTiles;
+    copy._assistantBubbleFitContent = _assistantBubbleFitContent;
+    copy._assistantBubbleSplitParagraphs = _assistantBubbleSplitParagraphs;
     copy._chatMessageBackgroundStyle = _chatMessageBackgroundStyle;
     copy._chatBubbleStyleOverrides = _chatBubbleStyleOverrides;
     copy._userChatBubbleStyleOverrides = _userChatBubbleStyleOverrides;
+    copy._toolSchemaOverrides = Map<String, ToolSchemaOverride>.from(
+      _toolSchemaOverrides,
+    );
     copy._mobileAssistantEditTabOrder = _mobileAssistantEditTabOrder;
     copy._hiddenMobileAssistantEditTabs = _hiddenMobileAssistantEditTabs;
     copy._mobileAssistantDetailOutlineEnabled =
@@ -5776,6 +6119,26 @@ class ProviderConfig {
   // Anthropic/OpenRouter Claude prompt caching for stable system prompts.
   final bool? claudePromptCachingEnabled;
   final String? claudePromptCachingTtl;
+
+  /// Whether this config points at DeepSeek, by endpoint host or by the user's
+  /// own naming of the provider.
+  static bool isDeepSeekConfig(ProviderConfig? config) {
+    if (config == null) return false;
+    final host = Uri.tryParse(config.baseUrl.trim())?.host.toLowerCase() ?? '';
+    return host.contains('deepseek.com') ||
+        config.id.trim().toLowerCase().contains('deepseek') ||
+        config.name.trim().toLowerCase().contains('deepseek');
+  }
+
+  /// Whether this config talks to DeepSeek's Claude-compatible endpoint,
+  /// which diverges from Anthropic on thinking/effort handling.
+  static bool isDeepSeekClaudeCompatible(
+    String modelId, {
+    ProviderConfig? config,
+  }) {
+    if (modelId.trim().toLowerCase().contains('deepseek')) return true;
+    return isDeepSeekConfig(config);
+  }
 
   static const String claudePromptCachingTtl5m = '5m';
   static const String claudePromptCachingTtl1h = '1h';
@@ -6072,6 +6435,9 @@ class ProviderConfig {
     if (k.contains('openrouter')) return 'https://openrouter.ai/api/v1';
     if (k.contains('aihubmix')) return 'https://aihubmix.com/v1';
     if (k.contains('随想')) return 'https://sui-xiang.com/v1';
+    if (k.contains('marucode') || k.contains('muteki')) {
+      return 'https://api.muteki.site/v1';
+    }
     if (RegExp(r'qwen|aliyun|dashscope').hasMatch(k)) {
       return 'https://dashscope.aliyuncs.com/compatible-mode/v1';
     }

@@ -1,9 +1,26 @@
+import 'package:uuid/uuid.dart';
+
 import '../../providers/settings_provider.dart';
 
 const String _openRouterAppReferer =
     'https://github.com/legsegue-gif/canary_alpha';
 const String _openRouterAppTitle = 'Canary';
 const String _openRouterAppCategories = 'general-chat';
+
+/// Resolve once per generation, before retries and tool follow-up rounds.
+Map<String, String>? providerSessionHeaders(
+  ProviderConfig config, {
+  String? conversationId,
+  Map<String, String>? extraHeaders,
+}) {
+  final host = Uri.tryParse(config.baseUrl)?.host.toLowerCase();
+  if (host != 'opencode.ai') return extraHeaders;
+  final id = conversationId?.trim() ?? '';
+  return {
+    'x-opencode-session': id.isEmpty ? const Uuid().v4() : id,
+    ...?extraHeaders,
+  };
+}
 
 bool isOpenRouterProvider(ProviderConfig config) {
   final host = Uri.tryParse(config.baseUrl)?.host.toLowerCase() ?? '';

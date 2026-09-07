@@ -15,7 +15,6 @@ import 'package:Canary/core/services/api/providers/openai/responses_api.dart';
 import 'package:Canary/core/services/api/providers/openai/responses_decoder.dart';
 import 'package:Canary/core/services/api/stream/sse_event.dart';
 import 'package:Canary/core/services/api/stream/stream_chunk.dart';
-import 'package:Canary/core/services/chat/chat_service.dart';
 import 'package:Canary/features/chat/widgets/chat_message_widget.dart';
 import 'package:Canary/features/chat/widgets/frosted/frosted_surface.dart';
 import 'package:Canary/features/home/controllers/stream_controller.dart'
@@ -245,7 +244,6 @@ void main() {
           ChatMessageBackgroundStyle.defaultStyle,
         );
         final controller = home_stream.StreamController(
-          chatService: ChatService(),
           onStateChanged: () {},
           getSettingsProvider: () => settings,
           getCurrentConversationId: () => 'conversation-search-same-id',

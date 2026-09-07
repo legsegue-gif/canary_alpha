@@ -42,6 +42,7 @@ import 'scroll_controller.dart' as scroll_ctrl;
 import 'home_view_model.dart';
 import '../services/message_builder_service.dart';
 import '../services/message_generation_service.dart';
+import '../services/local_tools_service.dart';
 import '../services/ask_user_interaction_service.dart';
 import '../services/ocr_service.dart';
 import '../services/translation_service.dart';
@@ -402,7 +403,6 @@ class HomePageController extends ChangeNotifier {
     _chatController = ChatController(chatService: _chatService);
     _chatControllerReady = true;
     _streamController = stream_ctrl.StreamController(
-      chatService: _chatService,
       onStateChanged: () => notifyListeners(),
       getSettingsProvider: () => _context.read<SettingsProvider>(),
       getCurrentConversationId: () => currentConversation?.id,
@@ -436,19 +436,21 @@ class HomePageController extends ChangeNotifier {
     _messageBuilderService = MessageBuilderService(
       chatService: _chatService,
       contextProvider: _context,
-      ocrHandler: (imagePaths, {revisionId, session}) =>
+      ocrHandler: (imagePaths, {revisionId, session, requestId}) =>
           _ocrService.getOcrTextForImages(
             imagePaths,
             _context,
             revisionId: revisionId,
             session: session,
+            requestId: requestId,
           ),
       ocrPrefetch: ({required revisionIds, required imagePaths}) =>
           _ocrService.prefetchPersistedOcr(
             revisionIds: revisionIds,
             imagePaths: imagePaths,
           ),
-      geminiThoughtSignatureHandler: _appendGeminiThoughtSignatureForApi,
+      providerArtifactLookup: (message, kind) =>
+          _chatService.getProviderArtifact(message.id, kind),
     );
     _messageBuilderService.ocrTextWrapper = _ocrService.wrapOcrBlock;
     _generationController = GenerationController(
@@ -616,6 +618,9 @@ class HomePageController extends ChangeNotifier {
       _mcpProvider = _context.read<McpProvider>();
       _mcpProvider!.addListener(_onMcpChanged);
     } catch (_) {}
+    try {
+      unawaited(DeviceLocalTools.prefetchIosCapabilities());
+    } catch (_) {}
   }
 
   void _setupKeyboardListeners() {}
@@ -663,7 +668,7 @@ class HomePageController extends ChangeNotifier {
           }
           break;
         case ChatAction.switchModel:
-          unawaited(showModelSelectSheet(ctx));
+          unawaited(showModelSelectSheet(ctx, controller: this));
           break;
         case ChatAction.enterGlobalSearch:
           enterGlobalSearchMode(preserveQuery: true);
@@ -799,7 +804,6 @@ class HomePageController extends ChangeNotifier {
           // the skeleton instead of a blank list.
           notifyListeners();
           await Future.wait([restoreAssistant, loadWindow]);
-          _streamController.clearGeminiThoughtSigs();
           _restoreMessageUiState();
           _scrollCtrl.positionAtBottomOnNextLayout();
           notifyListeners();
@@ -1043,6 +1047,7 @@ class HomePageController extends ChangeNotifier {
       toolName: part.toolName,
       arguments: part.arguments,
       content: content,
+      metadata: part.metadata,
       loading: false,
     );
     if (idx >= 0) {
@@ -1221,6 +1226,20 @@ class HomePageController extends ChangeNotifier {
 
   Future<void> clearContext() async {
     await _viewModel.clearContext();
+    notifyListeners();
+  }
+
+  /// Sets or clears the current conversation's model override.
+  ///
+  /// Passing null for both makes the conversation follow the assistant again.
+  Future<void> setConversationModel({
+    String? providerKey,
+    String? modelId,
+  }) async {
+    await _viewModel.setConversationModel(
+      providerKey: providerKey,
+      modelId: modelId,
+    );
     notifyListeners();
   }
 
@@ -1475,6 +1494,9 @@ class HomePageController extends ChangeNotifier {
 
     final ctx = _context;
     if (!ctx.mounted) return;
+    final keepThinkingAndToolCards = ctx
+        .read<SettingsProvider>()
+        .keepThinkingAndToolCardsWhenEditingAssistant;
     final isDesktop = isDesktopPlatform;
     final Future<MessageEditResult?> future = isDesktop
         ? showMessageEditDesktopDialog(ctx, message: message)
@@ -1492,6 +1514,12 @@ class HomePageController extends ChangeNotifier {
     final newMsg = await _chatService.appendMessageVersion(
       messageId: message.id,
       content: result.content,
+      parts: message.role == 'assistant' && !keepThinkingAndToolCards
+          ? ChatMessage.partsWithoutThinkingAndToolCards(
+              message.parts,
+              result.content,
+            )
+          : null,
     );
     if (newMsg == null) return;
 
@@ -2706,7 +2734,8 @@ class HomePageController extends ChangeNotifier {
 
         final cleanedParts = ChatMessage.partsWithRewrittenText(
           m.parts,
-          (text) => _streamController.captureGeminiThoughtSignature(text, m.id),
+          (text) =>
+              _chatService.migrateLegacyGeminiThoughtSignature(text, m.id),
         );
         if (!identical(cleanedParts, m.parts)) {
           final updated = m.copyWith(parts: cleanedParts);
@@ -2727,14 +2756,13 @@ class HomePageController extends ChangeNotifier {
         _translations[m.id] = td;
       }
     }
+    _viewModel.restoreRetryUiFromStreamingState();
   }
 
   void _restoreAssistantMessageUiState(ChatMessage message) {
     _streamController.restoreMessageUiState(
       message,
       getToolEventsFromDb: (id) => _chatService.getToolEvents(id),
-      getGeminiThoughtSigFromDb: (id) =>
-          _chatService.getGeminiThoughtSignature(id),
     );
   }
 
@@ -2780,16 +2808,6 @@ class HomePageController extends ChangeNotifier {
         messages[i] = messages[i].copyWith(parts: nextParts);
         notifyListeners();
       },
-    );
-  }
-
-  String _appendGeminiThoughtSignatureForApi(
-    ChatMessage message,
-    String content,
-  ) {
-    return _streamController.appendGeminiThoughtSignatureForApi(
-      message,
-      content,
     );
   }
 

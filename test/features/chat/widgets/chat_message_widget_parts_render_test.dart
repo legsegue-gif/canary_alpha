@@ -3,7 +3,6 @@ import 'package:Canary/core/models/chat_message.dart';
 import 'package:Canary/core/models/message_part.dart';
 import 'package:Canary/core/providers/settings_provider.dart';
 import 'package:Canary/core/providers/tts_provider.dart';
-import 'package:Canary/core/services/chat/chat_service.dart';
 import 'package:Canary/features/chat/pages/image_viewer_page.dart';
 import 'package:Canary/features/chat/widgets/chat_message_widget.dart';
 import 'package:Canary/features/chat/widgets/timeline_projection.dart';
@@ -555,7 +554,6 @@ void main() {
   ) async {
     final settings = SettingsProvider(createBusinessTestPreferences());
     final writer = StreamController(
-      chatService: ChatService(),
       onStateChanged: () {},
       getSettingsProvider: () => settings,
       getCurrentConversationId: () => 'c1',
@@ -581,7 +579,6 @@ void main() {
 
     for (final json in [persisted, staleEmptySplits]) {
       final reader = StreamController(
-        chatService: ChatService(),
         onStateChanged: () {},
         getSettingsProvider: () => settings,
         getCurrentConversationId: () => 'c1',
@@ -597,7 +594,6 @@ void main() {
       reader.restoreMessageUiState(
         message,
         getToolEventsFromDb: (_) => const [],
-        getGeminiThoughtSigFromDb: (_) => null,
       );
       expect(reader.getContentSplitData(message.id), isNull);
 

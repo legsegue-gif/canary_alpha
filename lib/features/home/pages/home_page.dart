@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:provider/provider.dart';
@@ -24,7 +24,6 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/compress_context_options.dart';
 import '../../../core/services/android_process_text.dart';
 import '../../../core/services/logging/flutter_logger.dart';
-import '../../../utils/sandbox_path_resolver.dart';
 import '../../../utils/platform_utils.dart';
 import '../../../desktop/search_provider_popover.dart';
 import '../../../desktop/reasoning_budget_popover.dart';
@@ -39,6 +38,7 @@ import '../../chat/widgets/context_management_sheet.dart';
 import '../../chat/widgets/reasoning_budget_sheet.dart';
 import '../../search/widgets/search_settings_sheet.dart';
 import '../../chat/widgets/frosted/chat_frosted_backdrop.dart';
+import '../../chat/widgets/chat_assistant_background.dart';
 import '../../model/widgets/model_select_sheet.dart';
 import '../../mcp/pages/mcp_page.dart';
 import '../../provider/pages/providers_page.dart';
@@ -870,7 +870,11 @@ class _HomePageState extends State<HomePage>
     final settings = context.watch<SettingsProvider>();
     final assistant = context.watch<AssistantProvider>().currentAssistant;
 
-    final modelInfo = getModelDisplayInfo(settings, assistant: assistant);
+    final modelInfo = getModelDisplayInfo(
+      settings,
+      conversation: _controller.currentConversation,
+      assistant: assistant,
+    );
 
     final title = _controller.isTemporaryConversation
         ? AppLocalizations.of(context)!.temporaryChatTitle
@@ -938,7 +942,8 @@ class _HomePageState extends State<HomePage>
       canToggleTemporaryConversation:
           _controller.canToggleTemporaryConversation,
       temporaryConversationEnabled: _controller.isTemporaryConversation,
-      onSelectModel: () => showModelSelectSheet(context),
+      onSelectModel: () =>
+          showModelSelectSheet(context, controller: _controller),
       globalSearchMode: _controller.isGlobalSearchMode,
       globalSearchQuery: _controller.globalSearchQuery,
       onGlobalSearchQueryChanged: _controller.setGlobalSearchQuery,
@@ -976,7 +981,7 @@ class _HomePageState extends State<HomePage>
       // (MobileBackgroundLayer); painting it again inside the body would only
       // duplicate it in a box that shrinks with the keyboard.
       topBackground: backgroundImageActive
-          ? _buildChatBackground(context, cs)
+          ? const ChatAssistantBackground(expand: false)
           : null,
       backgroundImageActive: backgroundImageActive,
       content: Builder(
@@ -1069,7 +1074,8 @@ class _HomePageState extends State<HomePage>
       onGlobalSearchQueryChanged: _controller.setGlobalSearchQuery,
       onOpenGlobalSearchResult: (convId, msgId) => _controller
           .openGlobalSearchResult(conversationId: convId, messageId: msgId),
-      onSelectModel: () => showModelSelectSheet(context),
+      onSelectModel: () =>
+          showModelSelectSheet(context, controller: _controller),
       onSidebarWidthChanged: _controller.updateSidebarWidth,
       onSidebarWidthChangeEnd: _controller.saveSidebarWidth,
       onRightSidebarWidthChanged: _controller.updateRightSidebarWidth,
@@ -1228,110 +1234,11 @@ class _HomePageState extends State<HomePage>
   // UI Component Builders
   // ============================================================================
 
-  Widget _buildChatBackground(BuildContext context, ColorScheme cs) {
-    return Builder(
-      builder: (context) {
-        final bg = context
-            .watch<AssistantProvider>()
-            .currentAssistant
-            ?.background;
-        final maskStrength = context
-            .watch<SettingsProvider>()
-            .chatBackgroundMaskStrength;
-        if (bg == null || bg.trim().isEmpty) return const SizedBox.shrink();
-        ImageProvider provider;
-        if (bg.startsWith('http')) {
-          provider = NetworkImage(bg);
-        } else {
-          final localPath = SandboxPathResolver.fix(bg);
-          final file = File(localPath);
-          if (!file.existsSync()) return const SizedBox.shrink();
-          provider = FileImage(file);
-        }
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  image: DecorationImage(
-                    image: provider,
-                    fit: BoxFit.cover,
-                    colorFilter: ColorFilter.mode(
-                      cs.shadow.withValues(alpha: 0.04),
-                      BlendMode.srcATop,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: () {
-                        final top = (0.20 * maskStrength).clamp(0.0, 1.0);
-                        final bottom = (0.50 * maskStrength).clamp(0.0, 1.0);
-                        return [
-                          cs.surface.withValues(alpha: top),
-                          cs.surface.withValues(alpha: bottom),
-                        ];
-                      }(),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   Widget _buildAssistantBackground(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final assistant = context.watch<AssistantProvider>().currentAssistant;
-    final bgRaw = (assistant?.background ?? '').trim();
-    Widget? bg;
-    if (bgRaw.isNotEmpty) {
-      if (bgRaw.startsWith('http')) {
-        bg = Image.network(
-          bgRaw,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-        );
-      } else {
-        try {
-          final fixed = SandboxPathResolver.fix(bgRaw);
-          final f = File(fixed);
-          if (f.existsSync()) {
-            bg = Image(image: FileImage(f), fit: BoxFit.cover);
-          }
-        } catch (_) {}
-      }
-    }
-    return IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          ColoredBox(color: cs.surface),
-          if (bg != null) Opacity(opacity: 0.9, child: bg),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  cs.surface.withValues(alpha: 0.08),
-                  cs.surface.withValues(alpha: 0.36),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
+    return const ChatAssistantBackground(
+      desktop: true,
+      includeSurfaceFill: true,
+      applyMaskStrength: false,
     );
   }
 
@@ -1358,9 +1265,7 @@ class _HomePageState extends State<HomePage>
     }
 
     final settings = context.watch<SettingsProvider>();
-    final suggestionsEnabled =
-        settings.suggestionModelProvider != null &&
-        settings.suggestionModelId != null;
+    final suggestionsEnabled = settings.isSuggestionGenerationEnabled;
     final assistant = context.watch<AssistantProvider>().currentAssistant;
     return MessageListView(
       processingFilesMessageId: _controller.processingFilesMessageId,
@@ -1460,8 +1365,21 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildChatInputBar(BuildContext context, {required bool isTablet}) {
+    final conversation = _controller.currentConversation;
+    final settings = context.watch<SettingsProvider>();
+    final chatModel = resolveChatModel(
+      settings,
+      conversation: conversation,
+      assistant: context.watch<AssistantProvider>().currentAssistant,
+    );
     return ChatInputSection(
       inputBarKey: _inputBarKey,
+      chatModelProviderKey: chatModel.providerKey,
+      chatModelId: chatModel.modelId,
+      chatModelIsConversationOverride:
+          settings.perChatModelEnabled &&
+          conversation?.chatModelProvider != null &&
+          conversation?.chatModelId != null,
       inputFocus: _inputFocus,
       inputController: _inputController,
       mediaController: _mediaController,
@@ -1475,7 +1393,8 @@ class _HomePageState extends State<HomePage>
           ? AppLocalizations.of(context)!.messageEditPageSaveAndSend
           : null,
       onMore: _toggleTools,
-      onSelectModel: () => showModelSelectSheet(context),
+      onSelectModel: () =>
+          showModelSelectSheet(context, controller: _controller),
       onLongPressSelectModel: () {
         Navigator.of(
           context,
@@ -1505,13 +1424,31 @@ class _HomePageState extends State<HomePage>
         final assistantProvider = context.read<AssistantProvider>();
         final settingsProvider = context.read<SettingsProvider>();
         final assistant = assistantProvider.currentAssistant;
-        if (assistant != null) {
+        if (assistant == null) return;
+        if (PlatformUtils.isDesktop) {
+          // Desktop popover keeps the legacy global-settings sync flow.
           if (assistant.thinkingBudget != null) {
             settingsProvider.setThinkingBudget(assistant.thinkingBudget);
           }
           await _openReasoningSettings();
           if (!mounted) return;
           final chosen = settingsProvider.thinkingBudget;
+          await assistantProvider.updateAssistant(
+            assistant.copyWith(thinkingBudget: chosen),
+          );
+          return;
+        }
+        // Mobile: seed the sheet via initialBudget instead of pre-writing
+        // global settings. setThinkingBudget notifies synchronously and would
+        // rebuild the home page (message list, input bar, drawer) on the
+        // first frames of the sheet's entrance animation, dropping frames.
+        int? chosen;
+        await _openReasoningSettings(
+          initialBudget: assistant.thinkingBudget,
+          onChanged: (v) => chosen = v,
+        );
+        if (!mounted) return;
+        if (chosen != null && chosen != assistant.thinkingBudget) {
           await assistantProvider.updateAssistant(
             assistant.copyWith(thinkingBudget: chosen),
           );
@@ -1732,19 +1669,53 @@ class _HomePageState extends State<HomePage>
   // Action Handlers (UI-specific, not in controller)
   // ============================================================================
 
+  /// The model this chat sends with: the conversation's own override first,
+  /// then the assistant's model, then the global default.
+  ({String? providerKey, String? modelId}) _resolvedChatModel() =>
+      resolveChatModel(
+        context.read<SettingsProvider>(),
+        conversation: _controller.currentConversation,
+        assistant: context.read<AssistantProvider>().currentAssistant,
+      );
+
   void _openSearchSettings() {
+    final model = _resolvedChatModel();
     if (PlatformUtils.isDesktop) {
-      showDesktopSearchProviderPopover(context, anchorKey: _inputBarKey);
+      showDesktopSearchProviderPopover(
+        context,
+        anchorKey: _inputBarKey,
+        chatModelProviderKey: model.providerKey,
+        chatModelId: model.modelId,
+      );
     } else {
-      showSearchSettingsSheet(context);
+      showSearchSettingsSheet(
+        context,
+        chatModelProviderKey: model.providerKey,
+        chatModelId: model.modelId,
+      );
     }
   }
 
-  Future<void> _openReasoningSettings() async {
+  Future<void> _openReasoningSettings({
+    int? initialBudget,
+    ValueChanged<int>? onChanged,
+  }) async {
+    final model = _resolvedChatModel();
     if (PlatformUtils.isDesktop) {
-      await showDesktopReasoningBudgetPopover(context, anchorKey: _inputBarKey);
+      await showDesktopReasoningBudgetPopover(
+        context,
+        anchorKey: _inputBarKey,
+        modelProvider: model.providerKey,
+        modelId: model.modelId,
+      );
     } else {
-      await showReasoningBudgetSheet(context);
+      await showReasoningBudgetSheet(
+        context,
+        modelProvider: model.providerKey,
+        modelId: model.modelId,
+        initialBudget: initialBudget,
+        onChanged: onChanged,
+      );
     }
   }
 
@@ -1796,12 +1767,11 @@ class _HomePageState extends State<HomePage>
 
   void _toggleTools() async {
     _controller.dismissKeyboard();
-    final cs = Theme.of(context).colorScheme;
     final assistantId = context.read<AssistantProvider>().currentAssistantId;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: cs.surface,
+      backgroundColor: context.overlaySurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1833,11 +1803,10 @@ class _HomePageState extends State<HomePage>
   }
 
   void _showContextManagementSheet() async {
-    final cs = Theme.of(context).colorScheme;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: cs.surface,
+      backgroundColor: context.overlaySurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),

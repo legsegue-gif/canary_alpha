@@ -1,7 +1,6 @@
 import "../../../support/business_test_harness.dart";
 import 'package:Canary/core/models/message_part.dart';
 import 'package:Canary/core/providers/settings_provider.dart';
-import 'package:Canary/core/services/chat/chat_service.dart';
 import 'package:Canary/features/home/controllers/chat_actions.dart';
 import 'package:Canary/features/home/controllers/stream_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,7 +15,6 @@ void main() {
 
   StreamController buildController(SettingsProvider settings) {
     return StreamController(
-      chatService: ChatService(),
       onStateChanged: () {},
       getSettingsProvider: () => settings,
       getCurrentConversationId: () => 'conversation-1',
