@@ -1,0 +1,10 @@
+# 这些 .so 提交进仓库，构建时不再从 Termux 源下载。
+#
+# Termux 源每个包只保留最新版，升级当天删除旧版（各镜像同步删除），
+# 而 proot 平均每两周自动升级一次 —— 依赖构建时下载，就意味着 Android
+# 构建每隔几周无预警地断一次。文件在仓库里，构建就与 Termux 的发布节奏无关。
+#
+# 构建脚本（build.gradle.kts 的 fetchProot）在文件齐全时自动跳过下载。
+# 升级 proot：删掉这些 .so，PROOT_VERSION=<新版> bash tool/fetch_proot.sh，
+# 更新 tool/proot_checksums.txt 与 NOTICE，提交。
+!*.so

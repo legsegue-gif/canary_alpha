@@ -248,5 +248,5 @@ verify_checksums
 echo "Checksums match $CHECKSUMS_FILE"
 
 echo ""
-echo "Done. Binaries are local-only (gitignored). NOTICE lives at:"
+echo "Done. Commit the binaries with tool/proot_checksums.txt. NOTICE lives at:"
 echo "  $JNI_LIBS/NOTICE"
