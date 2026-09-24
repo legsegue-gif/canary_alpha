@@ -172,6 +172,13 @@ void main() {
         final token = BackupCancelToken();
         final address = token.cellAddress;
 
+        // 「忽略 kill」由 test-only 开关保证，不依赖 native 阻塞在各平台上
+        // 能否挡住 Isolate.kill(immediate) —— 那取决于信号与安全点，
+        // Linux 与 macOS 行为不同。同文件的 sqlite close handshake 测试
+        // 也是这么做的。
+        debugSkipBackupIsolateKill = true;
+        addTearDown(() => debugSkipBackupIsolateKill = false);
+
         await expectLater(
           runBackupIsolate<void, int>(
             body: _nativeSleepIgnoringKill,
@@ -201,6 +208,10 @@ void main() {
         final token = BackupCancelToken();
         addTearDown(token.dispose);
         final started = DateTime.now();
+
+        // 同上：测试名里的「ignores kill」由开关保证，与平台无关。
+        debugSkipBackupIsolateKill = true;
+        addTearDown(() => debugSkipBackupIsolateKill = false);
 
         await expectLater(
           runBackupIsolate<void, int>(
