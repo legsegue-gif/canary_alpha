@@ -115,6 +115,7 @@ class MessageListView extends StatefulWidget {
     required this.dividerPadding,
     this.topContentPadding = 8,
     this.bottomContentPadding = 16,
+    this.footer,
     this.pinnedStreamingMessageId,
     this.isPinnedIndicatorActive = false,
     required this.processingFilesMessageId,
@@ -152,6 +153,7 @@ class MessageListView extends StatefulWidget {
     this.collapseThinkingSteps = false,
     this.showThinkingCards = true,
     this.showToolCards = true,
+    this.showProducedFiles = true,
     this.showToolResultSummary = false,
     this.hideToolResultImages = false,
     this.collapsedCodeLines,
@@ -226,6 +228,10 @@ class MessageListView extends StatefulWidget {
   final OnSelectMessages? onSelectMessages;
   final OnSpeakMessage? onSpeakMessage;
   final List<String> suggestions;
+
+  /// A compact action that scrolls after the last message, outside its content.
+  /// Kept in the final row so indexed navigation still counts only messages.
+  final Widget? footer;
   final OnSuggestionTap? onSuggestionTap;
   final OnRecoveredAskUserAnswer? onRecoveredAskUserAnswer;
   final void Function(String messageId, bool selected)? onToggleSelection;
@@ -259,6 +265,9 @@ class MessageListView extends StatefulWidget {
   /// Whether tool-use cards render in chat.
   final bool showToolCards;
 
+  /// Whether the file summary below a reply occupies height.
+  final bool showProducedFiles;
+
   /// Whether collapsed tool cards also show a short result summary.
   final bool showToolResultSummary;
 
@@ -287,6 +296,18 @@ class MessageListView extends StatefulWidget {
 }
 
 class _MessageListViewState extends State<MessageListView> {
+  static const _footerExtent = 48.0;
+  static final _idleStreamingContent = AlwaysStoppedAnimation(
+    StreamingContentData(content: '', totalTokens: 0),
+  );
+
+  bool get _hasFooter => _showsFooter(widget);
+
+  static bool _showsFooter(MessageListView view) =>
+      view.footer != null &&
+      !view.hasMoreAfter &&
+      !view.isLoadingWindow &&
+      !view.selecting;
   static const double _streamingUpdateDeferBottomTolerance = 56.0;
 
   bool _historyLoadScheduled = false;
@@ -583,6 +604,16 @@ class _MessageListViewState extends State<MessageListView> {
   /// the bottom and back. A content-derived estimate keeps those corrections
   /// small; it does not need to be exact, only the right order of magnitude.
   double _estimateItemExtent(int? index, double crossAxisExtent) {
+    if (index == null) return 0;
+    if (_effectiveRenderModels.isEmpty && _hasFooter) return _footerExtent;
+    final footerExtent =
+        _hasFooter && index == _effectiveRenderModels.length - 1
+        ? _footerExtent
+        : 0;
+    return _estimateMessageExtent(index, crossAxisExtent) + footerExtent;
+  }
+
+  double _estimateMessageExtent(int? index, double crossAxisExtent) {
     // A null index asks whether one extent fits every item. Answering with a
     // positive number makes SuperSliverList apply it to the whole list without
     // ever consulting the per-item branch below, so this has to be 0.
@@ -810,6 +841,7 @@ class _MessageListViewState extends State<MessageListView> {
           toolName: toolParts[i].toolName,
           arguments: toolParts[i].arguments,
           content: toolParts[i].content,
+          metadata: toolParts[i].metadata,
           loading: toolParts[i].loading,
           memoToken: identityHashCode(toolParts[i]),
         ),
@@ -850,6 +882,7 @@ class _MessageListViewState extends State<MessageListView> {
       toolCountAtSplit: toolCountAtSplit,
       transformText: _estimateVisualTransform,
       partsArrivalOrdered: message.isStreaming,
+      inlineThinkingExpanded: !settings.collapseThinking,
     );
     bool isPending(TimelineToolRef tool) => _isPendingApproval(
       conversationId: message.conversationId,
@@ -943,6 +976,7 @@ class _MessageListViewState extends State<MessageListView> {
           toolName: tool.toolName,
           arguments: tool.arguments,
           content: tool.content,
+          metadata: tool.metadata,
           showToolResultSummary: settings.showToolResultSummary,
           hideToolResultImages: settings.hideToolResultImages,
           pendingApproval: _isPendingApproval(
@@ -1190,6 +1224,18 @@ class _MessageListViewState extends State<MessageListView> {
     }
 
     final newModels = _effectiveRenderModels;
+    if ((_hasFooter || _showsFooter(oldWidget)) &&
+        (oldModels.length != newModels.length ||
+            _hasFooter != _showsFooter(oldWidget))) {
+      for (final index in {
+        math.max(0, oldModels.length - 1),
+        math.max(0, newModels.length - 1),
+      }) {
+        if (index < controller.numberOfItems) {
+          controller.invalidateExtent(index);
+        }
+      }
+    }
     final metricInputsChanged =
         oldWidget.chatFontScale != widget.chatFontScale ||
         oldWidget.selecting != widget.selecting ||
@@ -1200,6 +1246,7 @@ class _MessageListViewState extends State<MessageListView> {
         oldWidget.collapseThinkingSteps != widget.collapseThinkingSteps ||
         oldWidget.showThinkingCards != widget.showThinkingCards ||
         oldWidget.showToolCards != widget.showToolCards ||
+        oldWidget.showProducedFiles != widget.showProducedFiles ||
         oldWidget.showToolResultSummary != widget.showToolResultSummary ||
         oldWidget.hideToolResultImages != widget.hideToolResultImages ||
         oldWidget.collapsedCodeLines != widget.collapsedCodeLines ||
@@ -1686,9 +1733,14 @@ class _MessageListViewState extends State<MessageListView> {
                 widget.bottomContentPadding +
                     (widget.isPinnedIndicatorActive ? 12 : 0),
               ),
-              itemCount: _effectiveRenderModels.length,
+              itemCount: _effectiveRenderModels.isEmpty && _hasFooter
+                  ? 1
+                  : _effectiveRenderModels.length,
               keyboardDismissBehavior: _keyboardDismissBehavior,
               itemBuilder: (context, index) {
+                if (_effectiveRenderModels.isEmpty && _hasFooter) {
+                  return SizedBox(height: _footerExtent, child: widget.footer);
+                }
                 if (index < 0 || index >= _effectiveRenderModels.length) {
                   return const SizedBox.shrink();
                 }
@@ -1906,6 +1958,7 @@ class _MessageListViewState extends State<MessageListView> {
               completionTokens: data.completionTokens,
               cachedTokens: data.cachedTokens,
               durationMs: data.durationMs,
+              retryStatus: data.retryStatus,
             )
           : data;
     }
@@ -2020,9 +2073,10 @@ class _MessageListViewState extends State<MessageListView> {
                           textScale * presentation.chatFontScale,
                         ),
                       ),
-                      child: isStreaming
+                      child: message.role == 'assistant'
                           ? _buildStreamingMessageWidget(
                               context,
+                              isStreaming: isStreaming,
                               message: message,
                               index: index,
                               r: r,
@@ -2093,6 +2147,8 @@ class _MessageListViewState extends State<MessageListView> {
             padding: widget.dividerPadding,
             child: _buildContextDivider(context),
           ),
+        if (_hasFooter && index == _effectiveRenderModels.length - 1)
+          SizedBox(height: _footerExtent, child: widget.footer),
       ],
     );
     final isSpotlight =
@@ -2140,10 +2196,12 @@ class _MessageListViewState extends State<MessageListView> {
     );
   }
 
-  /// Build a streaming message widget that uses ValueListenableBuilder
-  /// to avoid full page rebuilds during streaming.
+  /// Keep the assistant subtree mounted when its stream finishes. Inactive
+  /// rows use immutable listenables, so they don't subscribe to stream/scroll
+  /// changes or retain a completed stream's payload.
   Widget _buildStreamingMessageWidget(
     BuildContext context, {
+    required bool isStreaming,
     required ChatMessage message,
     required int index,
     required stream_ctrl.ReasoningData? r,
@@ -2161,8 +2219,12 @@ class _MessageListViewState extends State<MessageListView> {
     required _MessagePresentation presentation,
   }) {
     return _StreamingMessageDataGate(
-      notifier: widget.streamingContentNotifier!.getNotifier(message.id),
-      deferUpdates: _deferStreamingMessageUpdates,
+      notifier: isStreaming
+          ? widget.streamingContentNotifier!.getNotifier(message.id)
+          : _idleStreamingContent,
+      deferUpdates: isStreaming
+          ? _deferStreamingMessageUpdates
+          : const AlwaysStoppedAnimation(false),
       deferredHold: _deferredStreamingHolds[message.id],
       builder: (context, data, deferUpdates) {
         final painted = deferUpdates
@@ -2177,15 +2239,17 @@ class _MessageListViewState extends State<MessageListView> {
             : message.totalTokens;
 
         // Create a modified message with streaming content
-        final streamingMessage = message.copyWith(
-          parts: painted.parts,
-          content: painted.parts == null ? displayContent : null,
-          totalTokens: displayTokens,
-          promptTokens: painted.promptTokens,
-          completionTokens: painted.completionTokens,
-          cachedTokens: painted.cachedTokens,
-          durationMs: painted.durationMs,
-        );
+        final streamingMessage = isStreaming
+            ? message.copyWith(
+                parts: painted.parts,
+                content: painted.parts == null ? displayContent : null,
+                totalTokens: displayTokens,
+                promptTokens: painted.promptTokens,
+                completionTokens: painted.completionTokens,
+                cachedTokens: painted.cachedTokens,
+                durationMs: painted.durationMs,
+              )
+            : message;
 
         // Update reasoning text from streaming data while preserving expanded state from r
         // This allows user to toggle expanded state during streaming without it being reset
@@ -2218,10 +2282,11 @@ class _MessageListViewState extends State<MessageListView> {
             isProcessingFiles: isProcessingFiles,
             suggestions: suggestions,
             presentation: presentation,
-            enableStreamingTextMotion: !deferUpdates,
+            enableStreamingTextMotion: !isStreaming || !deferUpdates,
             contentSplitOffsets: painted.contentSplitOffsets,
             reasoningCountAtSplit: painted.reasoningCountAtSplit,
             toolCountAtSplit: painted.toolCountAtSplit,
+            retryStatus: painted.retryStatus,
           ),
         );
       },
@@ -2250,6 +2315,7 @@ class _MessageListViewState extends State<MessageListView> {
     List<int>? contentSplitOffsets,
     List<int>? reasoningCountAtSplit,
     List<int>? toolCountAtSplit,
+    RetryStatus? retryStatus,
   }) {
     final currentIdx = availableVersions.indexOf(selectedVersion);
     return ChatMessageWidget(
@@ -2294,6 +2360,7 @@ class _MessageListViewState extends State<MessageListView> {
           isProcessingFiles ||
           (widget.isPinnedIndicatorActive &&
               (message.id == widget.pinnedStreamingMessageId)),
+      retryStatus: retryStatus,
       reasoningText: (message.role == 'assistant') ? (r?.text ?? '') : null,
       reasoningExpanded: (message.role == 'assistant')
           ? (r?.expanded ?? false)
@@ -2670,7 +2737,7 @@ class _StreamingMessageDataGate extends StatefulWidget {
     required this.builder,
   });
 
-  final ValueNotifier<StreamingContentData> notifier;
+  final ValueListenable<StreamingContentData> notifier;
   final ValueListenable<bool> deferUpdates;
   final StreamingContentData? deferredHold;
   final Widget Function(

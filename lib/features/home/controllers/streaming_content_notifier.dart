@@ -29,6 +29,31 @@ class ToolHeightEvent {
   final int version;
 }
 
+/// In-bubble countdown while auto-retry waits for the next attempt.
+@immutable
+class RetryStatus {
+  const RetryStatus({
+    required this.attempt,
+    required this.maxRetries,
+    required this.retryAt,
+  });
+
+  final int attempt;
+  final int maxRetries;
+  final DateTime retryAt;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RetryStatus &&
+          attempt == other.attempt &&
+          maxRetries == other.maxRetries &&
+          retryAt == other.retryAt;
+
+  @override
+  int get hashCode => Object.hash(attempt, maxRetries, retryAt);
+}
+
 class StreamingContentNotifier {
   /// Map of message ID to its content notifier.
   /// Each streaming message has its own `ValueNotifier<String>`.
@@ -64,6 +89,8 @@ class StreamingContentNotifier {
     String content,
     int totalTokens, {
     List<MessagePart>? parts,
+    String? reasoningText,
+    DateTime? reasoningStartAt,
     List<int>? contentSplitOffsets,
     List<int>? reasoningCountAtSplit,
     List<int>? toolCountAtSplit,
@@ -79,6 +106,8 @@ class StreamingContentNotifier {
         content: content,
         totalTokens: totalTokens,
         parts: parts ?? current.parts,
+        reasoningText: reasoningText,
+        reasoningStartAt: reasoningStartAt,
         contentSplitOffsets: contentSplitOffsets ?? current.contentSplitOffsets,
         reasoningCountAtSplit:
             reasoningCountAtSplit ?? current.reasoningCountAtSplit,
@@ -181,18 +210,30 @@ class StreamingContentNotifier {
     }
   }
 
+  void updateRetryStatus(String messageId, RetryStatus? status) {
+    final notifier = getNotifier(messageId);
+    final current = notifier.value;
+    if (current.retryStatus == status) return;
+    notifier.value = current.copyWith(
+      retryStatus: status,
+      clearRetryStatus: status == null,
+    );
+  }
+
   /// Remove notifier when streaming is complete.
   void removeNotifier(String messageId) {
     final notifier = _notifiers.remove(messageId);
     notifier?.dispose();
   }
 
-  /// Clear all notifiers (e.g., when switching conversations).
-  void clear() {
-    for (final notifier in _notifiers.values) {
+  /// Dispose notifiers except those belonging to retained generation runs.
+  void clear({Set<String> keepMessageIds = const {}}) {
+    _notifiers.removeWhere((id, notifier) {
+      if (keepMessageIds.contains(id)) return false;
       notifier.dispose();
-    }
-    _notifiers.clear();
+      return true;
+    });
+    _pendingHeightIds.removeWhere((id) => !keepMessageIds.contains(id));
   }
 
   /// Dispose all resources.
@@ -223,6 +264,7 @@ class StreamingContentData {
     int? completionTokens,
     int? cachedTokens,
     int? durationMs,
+    RetryStatus? retryStatus,
     int? timelineStructureSignature,
     List<int>? partStructureTokens,
   }) {
@@ -243,6 +285,7 @@ class StreamingContentData {
       completionTokens: completionTokens,
       cachedTokens: cachedTokens,
       durationMs: durationMs,
+      retryStatus: retryStatus,
       partStructureTokens: tokens,
       timelineStructureSignature:
           timelineStructureSignature ??
@@ -273,6 +316,7 @@ class StreamingContentData {
     this.completionTokens,
     this.cachedTokens,
     this.durationMs,
+    this.retryStatus,
     required this.partStructureTokens,
     required this.timelineStructureSignature,
   });
@@ -308,6 +352,7 @@ class StreamingContentData {
   final int? completionTokens;
   final int? cachedTokens;
   final int? durationMs;
+  final RetryStatus? retryStatus;
 
   StreamingContentData copyWith({
     String? content,
@@ -325,6 +370,8 @@ class StreamingContentData {
     int? completionTokens,
     int? cachedTokens,
     int? durationMs,
+    RetryStatus? retryStatus,
+    bool clearRetryStatus = false,
   }) {
     final nextParts = parts ?? this.parts;
     final nextSplits = contentSplitOffsets ?? this.contentSplitOffsets;
@@ -361,6 +408,7 @@ class StreamingContentData {
       completionTokens: completionTokens ?? this.completionTokens,
       cachedTokens: cachedTokens ?? this.cachedTokens,
       durationMs: durationMs ?? this.durationMs,
+      retryStatus: clearRetryStatus ? null : (retryStatus ?? this.retryStatus),
       partStructureTokens: nextPartTokens,
       timelineStructureSignature: structureUnchanged
           ? timelineStructureSignature
@@ -394,7 +442,8 @@ class StreamingContentData {
           promptTokens == other.promptTokens &&
           completionTokens == other.completionTokens &&
           cachedTokens == other.cachedTokens &&
-          durationMs == other.durationMs;
+          durationMs == other.durationMs &&
+          retryStatus == other.retryStatus;
 
   @override
   int get hashCode =>
@@ -412,7 +461,8 @@ class StreamingContentData {
       promptTokens.hashCode ^
       completionTokens.hashCode ^
       cachedTokens.hashCode ^
-      durationMs.hashCode;
+      durationMs.hashCode ^
+      retryStatus.hashCode;
 }
 
 /// Incremented only when a ToolCallPart payload is actually jsonDecoded.

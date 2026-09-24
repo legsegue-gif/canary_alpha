@@ -1,5 +1,9 @@
+import '../../../utils/utf16_safe_cut.dart';
+import '../../chat/utils/thinking_tag_parser.dart';
+import 'package:Canary/core/providers/external_mounts_provider.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 import '../../../core/database/chat_database_repository.dart';
@@ -11,21 +15,33 @@ import '../../../core/models/conversation.dart';
 import '../../../core/models/instruction_injection.dart';
 import '../../../core/models/memory_entry.dart';
 import '../../../core/models/world_book.dart';
+import '../../../core/models/conversation_prompt_settings.dart';
+import '../../../core/services/world_book_activation.dart';
 import '../../../core/providers/memory_provider.dart';
+import '../../../core/providers/environment_provider.dart';
 import '../../../core/providers/settings_provider.dart';
 import '../../../core/providers/user_provider.dart';
 import '../../../core/services/chat/chat_service.dart';
 import '../../../core/services/chat/document_text_extractor.dart';
+import '../../../utils/mcp_structured_image.dart';
 import '../../../utils/sandbox_path_resolver.dart';
 import '../../../core/services/chat/prompt_transformer.dart';
 import '../../../core/services/logging/context_log_models.dart';
 import '../../../core/services/logging/context_logger.dart';
 import '../../../core/services/memory/memory_block_builder.dart';
 import '../../../core/services/memory/memory_prompts.dart';
+import '../../../core/models/skills_binding.dart';
+import '../../../core/providers/workspace_provider.dart';
 import '../../../core/services/search/search_tool_service.dart';
+import '../../../core/services/skills/skills_service.dart';
+import '../../../core/services/workspace/workspace_runtime.dart';
+import '../../../core/services/workspace/workspace_tools_service.dart';
 import '../../../core/providers/instruction_injection_provider.dart';
 import '../../../core/providers/world_book_provider.dart';
 import '../../../core/services/api/builtin_tools.dart';
+import '../../../core/services/api/providers/claude/claude_container.dart';
+import '../../../core/services/api/providers/claude/claude_history.dart';
+import '../../../core/services/api/providers/google/gemini_thought_signature.dart';
 import '../../../core/models/assistant_regex.dart';
 import '../../../core/utils/multimodal_input_utils.dart';
 import '../../../utils/assistant_regex.dart';
@@ -33,11 +49,27 @@ import '../../../utils/markdown_media_sanitizer.dart';
 import 'ocr_service.dart';
 
 /// Result of §7.6 memory-prefix resolution.
+///
+/// [persistHash] separates "leave the stored hash alone" from "store [hash]".
+/// Clearing needs that distinction: when the last visible memory disappears the
+/// turn injects nothing yet must still record that the context now carries no
+/// snapshot, which is a null [hash] rather than an absent write.
 typedef MemoryPrefixResolution = ({
   String prefix,
   String? hash,
+  bool persistHash,
   String? snapshotKind,
 });
+
+/// The blocks memory injection would emit for one assistant at one moment.
+typedef MemorySnapshotState = ({String prefix, String hash, bool isEmpty});
+
+const MemoryPrefixResolution _noMemoryPrefix = (
+  prefix: '',
+  hash: null,
+  persistHash: false,
+  snapshotKind: null,
+);
 
 /// Memory injection state shared by the messages assembled in one request.
 ///
@@ -60,6 +92,16 @@ class MemoryInjectionPass {
   void recordInjectedHash(String? hash) {
     _injectedHash = hash;
     _hasInjectedHash = true;
+  }
+
+  /// What injection would emit right now, once it has been computed. Reused so
+  /// a request that resolves the state and then decides not to inject does not
+  /// read it a second time on the way out.
+  MemorySnapshotState? get currentSnapshot => _currentSnapshot;
+  MemorySnapshotState? _currentSnapshot;
+
+  void recordCurrentSnapshot(MemorySnapshotState snapshot) {
+    _currentSnapshot = snapshot;
   }
 }
 
@@ -84,7 +126,7 @@ class MessageBuilderService {
     this.chatRepository,
     this.ocrHandler,
     this.ocrPrefetch,
-    this.geminiThoughtSignatureHandler,
+    this.providerArtifactLookup,
   });
 
   final ChatService chatService;
@@ -104,6 +146,7 @@ class MessageBuilderService {
     List<String> imagePaths, {
     String? revisionId,
     OcrPrepareSession? session,
+    String? requestId,
   })?
   ocrHandler;
 
@@ -117,14 +160,109 @@ class MessageBuilderService {
   /// OCR text wrapper function
   String Function(String ocrText)? ocrTextWrapper;
 
-  /// Handler to append Gemini thought signatures for API calls
-  final String Function(ChatMessage message, String content)?
-  geminiThoughtSignatureHandler;
+  /// Provider state stored against an assistant message (a container id, a
+  /// Gemini thought signature), by kind. It rides along under an internal key
+  /// the provider strips.
+  final String? Function(ChatMessage message, String kind)?
+  providerArtifactLookup;
 
   /// Cache for document text extraction to avoid re-reading files on every message
   /// Keyed by path, validated with (modified + size) to avoid stale reuse.
   final Map<String, _DocTextCacheEntry> _docTextCache =
       <String, _DocTextCacheEntry>{};
+
+  /// Read-only, bounded context for a result that will be published later.
+  /// In particular, World Book timers and prompt/memory receipts are not written.
+  Future<List<Map<String, dynamic>>> buildDetachedTextContext({
+    required Assistant assistant,
+    required Conversation? conversation,
+    required String modelId,
+    required SettingsProvider settings,
+  }) async {
+    final limit = assistant.limitContextMessages
+        ? assistant.contextMessageSize.clamp(1, 64)
+        : 64;
+    final history = conversation == null
+        ? <ChatMessage>[]
+        : await chatService.loadSelectedContextMessages(
+            conversation.id,
+            truncateIndex: conversation.truncateIndex,
+            limit: limit,
+          );
+    if (history.any((m) => m.isStreaming)) throw StateError('in_flight');
+    final messages = <Map<String, dynamic>>[];
+    var remaining = 32000;
+    for (final message in history.reversed) {
+      if (message.role != 'user' && message.role != 'assistant') continue;
+      if (remaining <= 0) break;
+      final raw = message.role == 'assistant'
+          ? ThinkingTagParser.parseWithRanges(message.content).visibleContent
+          : message.content;
+      if (raw.trim().isEmpty) continue;
+      final text = truncateHeadTailUtf16Safe(
+        raw,
+        remaining,
+        marker: '\n[…truncated…]\n',
+      );
+      remaining -= text.length;
+      messages.insert(0, {'role': message.role, 'content': text});
+    }
+    if (conversation == null) {
+      for (final message in assistant.presetMessages) {
+        messages.add({'role': message.role, 'content': message.content});
+      }
+    }
+    final promptConversation =
+        conversation ??
+        Conversation(
+          title: '',
+          assistantId: assistant.id,
+          extras:
+              chatService.newConversationExtras?.call(assistant.id) ?? const {},
+        );
+    injectSystemPrompt(
+      messages,
+      assistant,
+      modelId,
+      conversation: promptConversation,
+    );
+    if (conversation?.summary?.trim().isNotEmpty == true &&
+        conversation!.truncateIndex < 0 &&
+        conversation.lastSummarizedMessageCount ==
+            await chatService.resolveMessageCount(conversation.id)) {
+      _appendToSystemMessage(
+        messages,
+        'Conversation summary:\n${conversation.summary}',
+        source: ContextSource.systemPrompt,
+      );
+    }
+    final memory = await detachedMemoryPrefix(
+      assistant: assistant,
+      settings: settings,
+    );
+    if (memory.isNotEmpty) {
+      _appendToSystemMessage(
+        messages,
+        memory,
+        source: ContextSource.memoryRules,
+      );
+    }
+    await injectInstructionPrompts(
+      messages,
+      assistant.id,
+      conversation: promptConversation,
+      conversationScoped: assistant.allowConversationPromptInjection,
+    );
+    await injectWorldBookPrompts(
+      messages,
+      assistant.id,
+      conversation: promptConversation,
+      conversationScoped: assistant.allowConversationPromptInjection,
+      sourceMessages: history,
+      persistActivation: false,
+    );
+    return messages;
+  }
 
   /// Collapse message versions to show only selected version per group.
   List<ChatMessage> collapseVersions(
@@ -238,7 +376,7 @@ class MessageBuilderService {
                 'role': 'tool',
                 'name': name,
                 'tool_call_id': id,
-                'content': c.toString(),
+                'content': toolResultContentForModel(c?.toString()),
                 if (e['metadata'] is Map)
                   'metadata': (e['metadata'] as Map).cast<String, dynamic>(),
               });
@@ -250,6 +388,23 @@ class MessageBuilderService {
                 'content': '\n\n',
                 'tool_calls': calls,
               };
+              final turn = providerArtifactLookup?.call(
+                m,
+                claudeTurnArtifactKind,
+              );
+              if (turn != null && turn.isNotEmpty) {
+                assistantToolMessage[multimodalInternalClaudeTurnKey] = turn;
+              }
+              // Also here: a turn that ran code and then said nothing has no
+              // final message below to carry the container.
+              final container = providerArtifactLookup?.call(
+                m,
+                claudeContainerArtifactKind,
+              );
+              if (container != null && container.isNotEmpty) {
+                assistantToolMessage[multimodalInternalClaudeContainerKey] =
+                    container;
+              }
               if (assistantReasoningContent?.isNotEmpty == true) {
                 assistantToolMessage['reasoning_content'] =
                     assistantReasoningContent;
@@ -282,10 +437,7 @@ class MessageBuilderService {
         }
       }
 
-      var content = m.content;
-      if (m.role == 'assistant' && geminiThoughtSignatureHandler != null) {
-        content = geminiThoughtSignatureHandler!(m, content);
-      }
+      final content = m.content;
       final mediaRefs = mediaRefsFromParts(m);
       // Pure-attachment turns have empty text content but still must be sent.
       // Document FileParts are omitted from mediaRefs (they travel via
@@ -300,9 +452,30 @@ class MessageBuilderService {
       final message = <String, dynamic>{'role': role, 'content': content};
       if (role == 'user') {
         message[internalRevisionIdKey] = m.id;
+      } else {
+        final container = providerArtifactLookup?.call(
+          m,
+          claudeContainerArtifactKind,
+        );
+        if (container != null && container.isNotEmpty) {
+          message[multimodalInternalClaudeContainerKey] = container;
+        }
+        final signature = providerArtifactLookup?.call(
+          m,
+          geminiThoughtSignatureArtifactKind,
+        );
+        if (signature != null && signature.isNotEmpty) {
+          message[multimodalInternalGeminiThoughtSignatureKey] = signature;
+        }
       }
       if (mediaRefs.isNotEmpty) {
         message[internalMediaPathsKey] = mediaRefs;
+      }
+      if (role == 'user') {
+        final documentRefs = documentRefsFromParts(m);
+        if (documentRefs.isNotEmpty) {
+          message[multimodalInternalDocumentPathsKey] = documentRefs;
+        }
       }
       if (assistantReasoningContent?.isNotEmpty == true) {
         message['reasoning_content'] = assistantReasoningContent;
@@ -326,7 +499,8 @@ class MessageBuilderService {
   /// Collect structured `_canary_media_paths` entries from image/file parts.
   ///
   /// Skips unavailable parts. Document (non-media) FileParts are omitted — they
-  /// travel through document extraction, not media-path attachments.
+  /// travel through document extraction, or as [documentRefsFromParts] for a
+  /// provider that takes the file itself.
   static List<Map<String, dynamic>> mediaRefsFromParts(ChatMessage message) {
     final refs = <Map<String, dynamic>>[];
     for (final part in message.parts) {
@@ -358,6 +532,29 @@ class MessageBuilderService {
           ),
         );
       }
+    }
+    return refs;
+  }
+
+  /// Collect `_canary_document_paths` entries: the FileParts that
+  /// [mediaRefsFromParts] leaves out.
+  static List<Map<String, dynamic>> documentRefsFromParts(ChatMessage message) {
+    final refs = <Map<String, dynamic>>[];
+    for (final part in message.parts) {
+      if (part is! FilePart || part.unavailable) continue;
+      final uri = part.uri.trim();
+      if (uri.isEmpty) continue;
+      final mime = resolveMediaAttachmentMime(
+        explicitMime: part.mime ?? '',
+        fileName: part.name,
+        path: uri,
+      );
+      if (isImageMime(mime) || isAudioMime(mime) || isVideoMime(mime)) {
+        continue;
+      }
+      refs.add(
+        encodeInternalDocumentRef((uri: uri, name: part.name, mime: mime)),
+      );
     }
     return refs;
   }
@@ -587,6 +784,8 @@ class MessageBuilderService {
     SettingsProvider settings, {
     Conversation? conversation,
     List<ChatMessage>? sourceMessages,
+    bool sandboxDataFiles = false,
+    Map<String, AttachmentInfo> workspaceAttachments = const {},
   }) {
     final bool ocrActive =
         settings.ocrEnabled &&
@@ -619,6 +818,11 @@ class MessageBuilderService {
           if (path.isNotEmpty) mediaPaths.add(path);
           continue;
         }
+        if (workspaceAttachments.containsKey(document.path)) continue;
+        if (sandboxDataFiles &&
+            isSandboxDataFile(fileName: document.fileName, mime: mime)) {
+          continue;
+        }
         // A document that still needs text extraction.
         return true;
       }
@@ -636,6 +840,11 @@ class MessageBuilderService {
   /// Process user messages in apiMessages: prefer frozen `promptContent`, else
   /// assemble (docs/OCR → memory prefix → template → time) and freeze (§8).
   ///
+  /// With [sandboxDataFiles], data files (see [isSandboxDataFile]) are left
+  /// out of the prompt for the provider to hand to its sandbox, and a message
+  /// carrying one is not frozen: the frozen prompt is provider-neutral, and a
+  /// later regeneration on a provider without a sandbox needs the text back.
+  ///
   /// Returns the image paths from the last user message (for API call).
   Future<List<String>> processUserMessagesForApi(
     List<Map<String, dynamic>> apiMessages,
@@ -643,6 +852,8 @@ class MessageBuilderService {
     Assistant? assistant, {
     Conversation? conversation,
     List<ChatMessage>? sourceMessages,
+    bool sandboxDataFiles = false,
+    Map<String, AttachmentInfo> workspaceAttachments = const {},
   }) async {
     final bool ocrActive =
         settings.ocrEnabled &&
@@ -755,7 +966,7 @@ class MessageBuilderService {
       try {
         final text = await DocumentTextExtractor.extractResolved(
           path: resolvedPath,
-          mime: d.mime,
+          mime: _effectiveAttachmentMime(d),
         );
         // Cache only when stat is available; otherwise avoid staleness.
         if (stat != null) {
@@ -766,6 +977,8 @@ class MessageBuilderService {
           );
         }
         return text;
+      } on AttachmentRequiresWorkspace {
+        throw AttachmentRequiresWorkspace(d.fileName);
       } catch (_) {
         if (stat != null) {
           _docTextCache[resolvedPath] = _DocTextCacheEntry(
@@ -780,6 +993,12 @@ class MessageBuilderService {
 
     final injectionPass = MemoryInjectionPass();
 
+    // Revision ids whose payload really came from memory injection. Format
+    // alone must never decide this: a user who pastes a snapshot copied out of
+    // the context log would otherwise have that text treated as an internal
+    // block and stripped off their message.
+    final snapshotRevisionIds = <String>{};
+
     for (int i = 0; i < apiMessages.length; i++) {
       if (!isPersistedUserMessage(apiMessages[i])) continue;
       final revisionId = (apiMessages[i][internalRevisionIdKey] ?? '')
@@ -793,6 +1012,23 @@ class MessageBuilderService {
       final parsedUser = chatMessageForParts != null
           ? parseInputFromMessage(chatMessageForParts)
           : parseInputFromApiMap(apiMessages[i]);
+      final hasWorkspaceDocuments = parsedUser.documents.any(
+        (d) => workspaceAttachments.containsKey(d.path),
+      );
+      // A local workspace already owns these documents. Do not additionally
+      // upload them to a provider's code-execution sandbox.
+      if (hasWorkspaceDocuments) {
+        final remaining = parseInternalDocumentRefs(
+          apiMessages[i][multimodalInternalDocumentPathsKey],
+        ).where((ref) => !workspaceAttachments.containsKey(ref.uri)).toList();
+        if (remaining.isEmpty) {
+          apiMessages[i].remove(multimodalInternalDocumentPathsKey);
+        } else {
+          apiMessages[i][multimodalInternalDocumentPathsKey] = remaining
+              .map(encodeInternalDocumentRef)
+              .toList();
+        }
+      }
       final videoPaths = <String>{
         for (final d in parsedUser.documents)
           if (isVideoMime(_effectiveAttachmentMime(d))) d.path.trim(),
@@ -890,13 +1126,14 @@ class MessageBuilderService {
           settings: settings,
         );
         apiMessages[i]['content'] = sendPayload;
+        final carriesSnapshot =
+            existing.carriesMemorySnapshot && sendPayload == existing.payload;
+        if (carriesSnapshot) snapshotRevisionIds.add(revisionId);
         if (ContextLogger.enabled) {
           _tagFrozenUserPrompt(
             apiMessages[i],
             payload: sendPayload,
-            carriesMemorySnapshot:
-                existing.carriesMemorySnapshot &&
-                sendPayload == existing.payload,
+            carriesMemorySnapshot: carriesSnapshot,
           );
         }
         continue;
@@ -915,9 +1152,25 @@ class MessageBuilderService {
       final cleanedUser = replacedUserText.trim();
 
       final filePrompts = StringBuffer();
+      var leftToSandbox = false;
       for (final d in parsedUser.documents) {
+        final local = workspaceAttachments[d.path];
+        if (local != null) {
+          leftToSandbox = true;
+          filePrompts.writeln('Attached file: ${d.fileName}');
+          filePrompts.writeln('Path: ${local.modelPath} (${local.size} bytes)');
+          filePrompts.writeln(
+            'Use workspace file tools to inspect it as needed.',
+          );
+          continue;
+        }
         final effectiveMime = _effectiveAttachmentMime(d);
         if (isVideoMime(effectiveMime) || isAudioMime(effectiveMime)) {
+          continue;
+        }
+        if (sandboxDataFiles &&
+            isSandboxDataFile(fileName: d.fileName, mime: effectiveMime)) {
+          leftToSandbox = true;
           continue;
         }
         final text = await readDocument(d);
@@ -932,7 +1185,7 @@ class MessageBuilderService {
       }
 
       String merged = (filePrompts.toString() + cleanedUser).trim();
-      var canFreezePrompt = true;
+      var canFreezePrompt = !leftToSandbox;
 
       if (ocrActive && ocrHandler != null) {
         final ocrTargets = parsedUser.imagePaths
@@ -950,6 +1203,7 @@ class MessageBuilderService {
             ocrTargets,
             revisionId: revisionId.isEmpty ? null : revisionId,
             session: ocrSession,
+            requestId: conversation?.id,
           );
           if (ocrText == null) {
             canFreezePrompt = false;
@@ -996,13 +1250,138 @@ class MessageBuilderService {
           now: now,
         );
         if (assistant?.appendCurrentTimeToUserMessage == true) {
-          content = '$content\n\n${MemoryPrompts.formatCurrentTimeTag(now)}';
+          final timeTag = MemoryPrompts.formatCurrentTimeTag(
+            now,
+            useIso8601: assistant!.useIso8601TimeFormat,
+          );
+          content = '$content\n\n$timeTag';
         }
         apiMessages[i]['content'] = content;
       }
     }
 
+    await refreshMemorySnapshots(
+      apiMessages,
+      assistant: assistant,
+      conversation: conversation,
+      settings: settings,
+      pass: injectionPass,
+      snapshotRevisionIds: snapshotRevisionIds
+        ..addAll(injectionPass.snapshotCarriers),
+    );
+
     return lastUserImagePaths ?? <String>[];
+  }
+
+  /// Leave exactly the live memory snapshot in the request (§7.6).
+  ///
+  /// A snapshot is frozen into the user message it was injected on and would
+  /// otherwise be replayed for the life of the conversation. Every other one is
+  /// stale the moment memory changes, and a scope switch makes the staleness
+  /// user-visible: entries moved from global to one assistant keep showing up
+  /// in another assistant's older conversations, because that conversation's
+  /// history still carries the snapshot taken while they were global.
+  ///
+  /// The freeze rows are left untouched — they record what was actually sent,
+  /// and a turn that changes nothing must keep hitting the prompt cache — so
+  /// the correction happens on the way out instead: superseded prefixes are
+  /// dropped, and when nothing in this request injected a fresh snapshot the
+  /// surviving one is brought up to date in place.
+  ///
+  /// [snapshotRevisionIds] names the messages whose payload really came from
+  /// injection. Only those are candidates; text that merely looks like a
+  /// snapshot is the user's own and stays untouched.
+  Future<void> refreshMemorySnapshots(
+    List<Map<String, dynamic>> apiMessages, {
+    required Assistant? assistant,
+    required Conversation? conversation,
+    required SettingsProvider settings,
+    required Set<String> snapshotRevisionIds,
+    MemoryInjectionPass? pass,
+  }) async {
+    if (snapshotRevisionIds.isEmpty) return;
+
+    final carriers = <int>[];
+    int? injectedThisRequest;
+    for (int i = 0; i < apiMessages.length; i++) {
+      final message = apiMessages[i];
+      if ((message['role'] ?? '').toString() != 'user') continue;
+      final revisionId = (message[internalRevisionIdKey] ?? '')
+          .toString()
+          .trim();
+      if (!snapshotRevisionIds.contains(revisionId)) continue;
+      final content = message['content'];
+      if (content is! String || content.isEmpty) continue;
+      if (MemoryBlockBuilder.endOfInjectedPrefix(content) == null) continue;
+      carriers.add(i);
+      if (pass?.snapshotCarriers.contains(revisionId) ?? false) {
+        injectedThisRequest = i;
+      }
+    }
+    if (carriers.isEmpty) return;
+
+    // A snapshot injected during this request is the live one wherever it sits.
+    // Position alone would get this wrong: a history message that could not be
+    // frozen (a failed OCR, a sandbox data file) is reassembled mid-request and
+    // can take the fresh snapshot while an older frozen one follows it.
+    int? live = injectedThisRequest;
+    String? wanted;
+    if (live == null) {
+      // Nothing injected — either the state is unchanged, or no new user
+      // message forced a decision at all, which is what regenerating an old
+      // reply does. The surviving carrier has to prove it is current by holding
+      // exactly the snapshot the state produces right now; anything else is
+      // rewritten in place, and an empty state rewrites it away.
+      //
+      // Its own prefix is the only reliable evidence. The conversation's stored
+      // hash names whichever snapshot was injected last, which need not be the
+      // one that survives here: regenerating an earlier reply cuts the later
+      // messages — and the newer snapshot with them — out of the request.
+      //
+      // The rewrite is deliberately never persisted: the stored hash must keep
+      // describing the freeze rows, or the next turn would believe the stale
+      // prefix is current and send it untouched.
+      if (assistant == null || _repo == null) return;
+      final current = assistant.enableMemory && !_legacyMemoryMode(settings)
+          ? pass?.currentSnapshot ??
+                await currentMemorySnapshot(
+                  assistant: assistant,
+                  lang: settings.resolvedMemoryPromptLang,
+                  settings: settings,
+                )
+          : null;
+      wanted = current == null || current.isEmpty ? '' : current.prefix;
+      live = carriers.last;
+    }
+
+    for (final i in carriers) {
+      final message = apiMessages[i];
+      final split = MemoryBlockBuilder.splitInjectedPrefix(
+        message['content'] as String,
+      );
+      if (split == null) continue;
+      if (i == live) {
+        if (wanted == null || wanted == split.prefix) continue;
+        final refreshed = '$wanted${split.rest}';
+        message['content'] = refreshed;
+        if (ContextLogger.enabled) {
+          _tagFrozenUserPrompt(
+            message,
+            payload: refreshed,
+            carriesMemorySnapshot: wanted.isNotEmpty,
+          );
+        }
+        continue;
+      }
+      message['content'] = split.rest;
+      if (ContextLogger.enabled) {
+        ContextSegmentTags.replaceWithSingle(
+          message,
+          source: ContextSource.chatHistory,
+          length: split.rest.length,
+        );
+      }
+    }
   }
 
   /// The stored message behind an api payload, or null when it cannot be
@@ -1067,7 +1446,7 @@ class MessageBuilderService {
     }
 
     final memory = assistant == null
-        ? (prefix: '', hash: null, snapshotKind: null)
+        ? _noMemoryPrefix
         : await resolveMemoryPrefix(
             conversation: conversation,
             assistant: assistant,
@@ -1090,9 +1469,14 @@ class MessageBuilderService {
       message: processedUserBody,
       now: message.timestamp,
     );
-    final timeSuffix = (assistant?.appendCurrentTimeToUserMessage ?? false)
-        ? '\n\n${MemoryPrompts.formatCurrentTimeTag(message.timestamp)}'
-        : '';
+    var timeSuffix = '';
+    if (assistant?.appendCurrentTimeToUserMessage == true) {
+      final timeTag = MemoryPrompts.formatCurrentTimeTag(
+        message.timestamp,
+        useIso8601: assistant!.useIso8601TimeFormat,
+      );
+      timeSuffix = '\n\n$timeTag';
+    }
     final finalContent = '${memory.prefix}$templated$timeSuffix';
 
     if (ContextLogger.enabled) {
@@ -1133,7 +1517,9 @@ class MessageBuilderService {
         conversationId: message.conversationId,
         payload: finalContent,
         carriesMemorySnapshot: memory.prefix.isNotEmpty,
-        injectedMemoryHash: memory.hash,
+        injectedMemoryHash: memory.persistHash
+            ? Value(memory.hash)
+            : const Value.absent(),
       );
     }
 
@@ -1149,6 +1535,42 @@ class MessageBuilderService {
     }
   }
 
+  /// Exact, read-only memory input for preparation and its revision check.
+  /// Tool instructions and time-dependent templates are omitted because
+  /// detached preparation cannot use memory-management tools.
+  Future<String> detachedMemoryPrefix({
+    required Assistant assistant,
+    required SettingsProvider settings,
+  }) async {
+    if (!assistant.enableMemory) return '';
+    if (settings.legacyMemoryMode) return _legacyMemoryBlock(assistant.id);
+    final snapshot = await currentMemorySnapshot(
+      assistant: assistant,
+      lang: settings.resolvedMemoryPromptLang,
+      settings: settings,
+    );
+    return snapshot != null && !snapshot.isEmpty ? snapshot.prefix : '';
+  }
+
+  Future<String> _legacyMemoryBlock(String assistantId) async {
+    final memories = contextProvider.read<MemoryProvider>();
+    await memories.initialize();
+    final buf = StringBuffer();
+    buf.writeln('## Memories');
+    buf.writeln(
+      'These are memories that you can reference in the future conversations.',
+    );
+    buf.writeln('<memories>');
+    for (final memory in memories.getForAssistant(assistantId)) {
+      buf.writeln('<record>');
+      buf.writeln('<id>${memory.id}</id>');
+      buf.writeln('<content>${memory.content}</content>');
+      buf.writeln('</record>');
+    }
+    buf.writeln('</memories>');
+    return buf.toString();
+  }
+
   /// Drop a v2 snapshot that was frozen into history while the new memory
   /// system was on. The stored freeze row is left intact so switching back
   /// still hits prompt cache / hash gating.
@@ -1161,24 +1583,20 @@ class MessageBuilderService {
     return MemoryBlockBuilder.splitInjectedPrefix(payload)?.rest ?? payload;
   }
 
-  /// §7.6 hash gating + self-healing. Compare hash **before** writing it.
-  Future<MemoryPrefixResolution> resolveMemoryPrefix({
-    required Conversation conversation,
+  /// The blocks memory injection would emit right now for [assistant], plus
+  /// their hash. Pure state: it decides nothing about whether to inject.
+  ///
+  /// [isEmpty] means neither a profile field nor a visible memory exists —
+  /// distinct from the hash, which is a perfectly good hash of two empty
+  /// blocks. Always a full snapshot: a superseded one is stripped from history
+  /// rather than left in place for an update block to correct.
+  Future<MemorySnapshotState?> currentMemorySnapshot({
     required Assistant assistant,
-    required List<Map<String, dynamic>> apiMessages,
-    required String currentMessageId,
     required MemoryPromptLang lang,
-    MemoryInjectionPass? pass,
     SettingsProvider? settings,
   }) async {
-    if (_legacyMemoryMode(settings) || !assistant.enableMemory) {
-      return (prefix: '', hash: null, snapshotKind: null);
-    }
-
     final repo = _repo;
-    if (repo == null) {
-      return (prefix: '', hash: null, snapshotKind: null);
-    }
+    if (repo == null) return null;
 
     SettingsProvider? resolvedSettings = settings;
     if (resolvedSettings == null) {
@@ -1210,11 +1628,44 @@ class MessageBuilderService {
       lang: lang,
       maxItems: maxItems,
     );
-
-    final currentHash = MemoryBlockBuilder.hashBlocks(
-      profileBlock,
-      memoryBlock,
+    return (
+      prefix: MemoryBlockBuilder.buildFullSnapshotPrefix(
+        profileBlock,
+        memoryBlock,
+        lang,
+      ),
+      hash: MemoryBlockBuilder.hashBlocks(profileBlock, memoryBlock),
+      isEmpty: !hasProfile && !hasAnyMemory,
     );
+  }
+
+  /// §7.6 hash gating + self-healing. Compare hash **before** writing it.
+  Future<MemoryPrefixResolution> resolveMemoryPrefix({
+    required Conversation conversation,
+    required Assistant assistant,
+    required List<Map<String, dynamic>> apiMessages,
+    required String currentMessageId,
+    required MemoryPromptLang lang,
+    MemoryInjectionPass? pass,
+    SettingsProvider? settings,
+  }) async {
+    if (_legacyMemoryMode(settings) || !assistant.enableMemory) {
+      return _noMemoryPrefix;
+    }
+
+    final repo = _repo;
+    if (repo == null) {
+      return _noMemoryPrefix;
+    }
+
+    final current = await currentMemorySnapshot(
+      assistant: assistant,
+      lang: lang,
+      settings: settings,
+    );
+    if (current == null) return _noMemoryPrefix;
+    pass?.recordCurrentSnapshot(current);
+    final currentHash = current.hash;
 
     // Self-healing: any history user message in *this* request carrying a
     // snapshot? Read revision ids before stripInternalRevisionIds; exclude
@@ -1234,15 +1685,9 @@ class MessageBuilderService {
         ) ||
         await repo.anyPromptCarriesMemorySnapshot(historyUserIds);
 
-    // With no prior snapshot there is nothing to clear. Once a snapshot has
-    // been sent, however, the all-empty state is itself the latest snapshot.
-    if (!hasProfile && !hasAnyMemory && !hasSnapshot) {
-      return (prefix: '', hash: null, snapshotKind: null);
-    }
-
     // CRITICAL: compare against the prior hash BEFORE any write (appendix §6).
-    // Writing first makes currentHash == injectedMemoryHash and the update
-    // branch is permanently unreachable.
+    // Writing first makes currentHash == injectedMemoryHash and no change is
+    // ever detected again.
     //
     // Read from the database, not from [conversation]: callers hand us
     // `conversation.copyWith(...)` and nothing ever loads this column back into
@@ -1251,35 +1696,42 @@ class MessageBuilderService {
     //
     // A hash already injected earlier in this same request wins, because
     // temporary conversations are never persisted and would otherwise read
-    // null for every message and repeat an identical update block on each one.
+    // null for every message and repeat an identical snapshot on each one.
     final previousHash = pass != null && pass.hasInjectedHash
         ? pass.injectedHash
         : await repo.getConversationInjectedMemoryHash(conversation.id);
 
-    final String prefix;
-    final String snapshotKind;
-    if (!hasSnapshot) {
-      prefix = MemoryBlockBuilder.buildFullSnapshotPrefix(
-        profileBlock,
-        memoryBlock,
-        lang,
+    // Nothing visible left. The snapshots already frozen into history are
+    // dropped on the way out by [refreshMemorySnapshots], so no update
+    // block has to announce the emptiness — but the conversation must record
+    // that its context now carries no snapshot at all. Skipping that write
+    // would leave the hash of the vanished snapshot behind, and re-adding the
+    // same content later would hash equal to it and never be injected again.
+    if (current.isEmpty) {
+      if (!hasSnapshot && previousHash == null) return _noMemoryPrefix;
+      pass?.recordInjectedHash(null);
+      return (
+        prefix: '',
+        hash: null,
+        // Already cleared on an earlier turn: recording it again would rewrite
+        // the same null every turn the memory stays empty.
+        persistHash: previousHash != null,
+        snapshotKind: null,
       );
-      snapshotKind = 'full';
-    } else if (currentHash != previousHash) {
-      prefix = MemoryBlockBuilder.buildUpdatePrefix(
-        profileBlock,
-        memoryBlock,
-        lang,
-      );
-      snapshotKind = 'update';
-    } else {
-      return (prefix: '', hash: null, snapshotKind: null);
     }
+
+    // Already the snapshot in context, and a message still carries it.
+    if (hasSnapshot && currentHash == previousHash) return _noMemoryPrefix;
 
     // The hash lands in the database through freezeMessagePrompt, in the same
     // transaction as the prompt row.
     pass?.recordInjectedHash(currentHash);
-    return (prefix: prefix, hash: currentHash, snapshotKind: snapshotKind);
+    return (
+      prefix: current.prefix,
+      hash: currentHash,
+      persistHash: true,
+      snapshotKind: 'full',
+    );
   }
 
   /// Default OCR text wrapper
@@ -1299,20 +1751,21 @@ class MessageBuilderService {
   void injectSystemPrompt(
     List<Map<String, dynamic>> apiMessages,
     Assistant? assistant,
-    String modelId,
-  ) {
-    if ((assistant?.systemPrompt.trim().isNotEmpty ?? false)) {
+    String modelId, {
+    Conversation? conversation,
+  }) {
+    final prompt = ConversationPromptSettings.fromExtras(
+      conversation?.extras ?? const {},
+    ).effectiveSystemPrompt(assistant);
+    if (assistant != null && prompt.trim().isNotEmpty) {
       final vars = PromptTransformer.buildPlaceholders(
         context: contextProvider,
-        assistant: assistant!,
+        assistant: assistant,
         modelId: modelId,
         modelName: modelId,
         userNickname: contextProvider.read<UserProvider>().name,
       );
-      final sys = PromptTransformer.replacePlaceholders(
-        assistant.systemPrompt,
-        vars,
-      );
+      final sys = PromptTransformer.replacePlaceholders(prompt, vars);
       final sysMessage = <String, dynamic>{'role': 'system', 'content': sys};
       if (ContextLogger.enabled) {
         ContextSegmentTags.replaceWithSingle(
@@ -1331,7 +1784,8 @@ class MessageBuilderService {
   /// user template)` — must not vary with memory content or the clock (§11.1).
   /// Relative order among remaining system injections is preserved by the
   /// caller (`injectSystemPrompt` → this → `injectSearchPrompt` →
-  /// `injectInstructionPrompts` → `injectWorldBookPrompts`).
+  /// `injectInstructionPrompts` → `injectWorldBookPrompts` →
+  /// `injectWorkspacePrompt` → `injectSkillsPrompt`).
   Future<void> injectMemoryAndRecentChats(
     List<Map<String, dynamic>> apiMessages,
     Assistant? assistant, {
@@ -1385,23 +1839,9 @@ class MessageBuilderService {
   }) async {
     if (assistant.enableMemory) {
       final resolved = settings ?? contextProvider.read<SettingsProvider>();
-      final mp = contextProvider.read<MemoryProvider>();
-      await mp.initialize();
-      final mems = mp.getForAssistant(assistant.id);
+      final memory = await _legacyMemoryBlock(assistant.id);
       final currentHour = _formatCurrentHour(DateTime.now());
-      final buf = StringBuffer();
-      buf.writeln('## Memories');
-      buf.writeln(
-        'These are memories that you can reference in the future conversations.',
-      );
-      buf.writeln('<memories>');
-      for (final m in mems) {
-        buf.writeln('<record>');
-        buf.writeln('<id>${m.id}</id>');
-        buf.writeln('<content>${m.content}</content>');
-        buf.writeln('</record>');
-      }
-      buf.writeln('</memories>');
+      final buf = StringBuffer(memory);
       final template = resolved.resolvedMemoryPromptLang == MemoryPromptLang.zh
           ? resolved.legacyMemoryPromptZh
           : resolved.legacyMemoryPromptEn;
@@ -1477,14 +1917,21 @@ class MessageBuilderService {
   /// Inject instruction injection prompts into apiMessages.
   Future<void> injectInstructionPrompts(
     List<Map<String, dynamic>> apiMessages,
-    String? assistantId,
-  ) async {
+    String? assistantId, {
+    Conversation? conversation,
+    bool conversationScoped = false,
+  }) async {
     try {
       List<InstructionInjection> actives = const <InstructionInjection>[];
       try {
         final ip = contextProvider.read<InstructionInjectionProvider>();
         await ip.initialize();
-        actives = ip.activesFor(assistantId);
+        final ids = conversationScoped
+            ? ConversationPromptSettings.fromExtras(
+                conversation?.extras ?? const {},
+              ).instructionIds
+            : ip.activeIdsFor(assistantId);
+        actives = ip.items.where((item) => ids.contains(item.id)).toList();
       } catch (_) {}
       final prompts = actives
           .map((e) => e.prompt.trim())
@@ -1501,11 +1948,87 @@ class MessageBuilderService {
     } catch (_) {}
   }
 
+  /// Inject the workspace path / tool prompt after other system injections.
+  Future<void> injectWorkspacePrompt(
+    List<Map<String, dynamic>> apiMessages,
+    Assistant? assistant, {
+    String? conversationId,
+    WorkspaceToolContext? workspaceContext,
+    List<AttachmentInfo> attachments = const [],
+  }) async {
+    try {
+      final environmentProvider = contextProvider.read<EnvironmentProvider?>();
+      final ctx =
+          workspaceContext ??
+          await WorkspaceToolsService.resolve(
+            externalMounts: contextProvider.read<ExternalMountsProvider?>(),
+            conversationId: conversationId,
+            workspaceProvider: contextProvider.read<WorkspaceProvider>(),
+            runtimeProvider: contextProvider.read<WorkspaceRuntimeProvider>(),
+            chatService: chatService,
+          );
+      if (ctx == null) return;
+      final environment = await environmentProvider?.loadExecutionConfig();
+      final fragment = WorkspaceToolsService.buildPromptFragment(
+        ctx,
+        attachments: attachments,
+        environmentVariableNames: environment?.variables.keys ?? const [],
+      );
+      if (fragment.trim().isEmpty) return;
+      _appendToSystemMessage(
+        apiMessages,
+        fragment,
+        source: ContextSource.instructionInjection,
+      );
+    } catch (_) {}
+  }
+
+  /// Inject the `<available_skills>` list after the workspace prompt.
+  Future<void> injectSkillsPrompt(
+    List<Map<String, dynamic>> apiMessages,
+    Assistant? assistant, {
+    String? conversationId,
+    WorkspaceToolContext? workspaceContext,
+  }) async {
+    try {
+      final skillsService = contextProvider.read<SkillsService>();
+      await skillsService.loaded;
+      List<String>? override;
+      if (conversationId != null && conversationId.isNotEmpty) {
+        final conversation = chatService.getConversation(conversationId);
+        if (conversation != null) {
+          override = SkillsBinding.fromExtras(conversation.extras).skillIds;
+        }
+      }
+      final skills = skillsService.resolveForAssistant(
+        assistant,
+        conversationOverride: override,
+      );
+      if (skills.isEmpty) return;
+      final skillsModelRoot =
+          workspaceContext?.paths.modelSkillsDir ?? '/skills';
+      final fragment = buildAvailableSkillsFragment(
+        skills,
+        skillsModelRoot: skillsModelRoot,
+      );
+      if (fragment.trim().isEmpty) return;
+      _appendToSystemMessage(
+        apiMessages,
+        fragment,
+        source: ContextSource.instructionInjection,
+      );
+    } catch (_) {}
+  }
+
   /// Inject world book (lorebook) entries into apiMessages.
   Future<void> injectWorldBookPrompts(
     List<Map<String, dynamic>> apiMessages,
-    String? assistantId,
-  ) async {
+    String? assistantId, {
+    Conversation? conversation,
+    bool conversationScoped = false,
+    List<ChatMessage>? sourceMessages,
+    bool persistActivation = true,
+  }) async {
     try {
       List<WorldBook> all = const <WorldBook>[];
       List<String> activeBookIds = const <String>[];
@@ -1514,89 +2037,97 @@ class MessageBuilderService {
         final wb = contextProvider.read<WorldBookProvider>();
         await wb.initialize();
         all = wb.books;
-        activeBookIds = wb.activeBookIdsFor(assistantId);
+        activeBookIds = conversationScoped
+            ? ConversationPromptSettings.fromExtras(
+                conversation?.extras ?? const {},
+              ).worldBookIds
+            : wb.activeBookIdsFor(assistantId);
       } catch (_) {}
-
-      if (all.isEmpty || activeBookIds.isEmpty) return;
 
       final activeSet = activeBookIds.toSet();
       final books = all
           .where((b) => b.enabled && activeSet.contains(b.id))
           .toList(growable: false);
-      if (books.isEmpty) return;
-
-      String extractContextForDepth(int scanDepth) {
-        final depth = scanDepth <= 0 ? 1 : scanDepth;
-        final parts = <String>[];
-        for (
-          int i = apiMessages.length - 1;
-          i >= 0 && parts.length < depth;
-          i--
-        ) {
-          final role = (apiMessages[i]['role'] ?? '').toString();
-          if (role != 'user' && role != 'assistant') continue;
-          final content = (apiMessages[i]['content'] ?? '').toString().trim();
-          if (content.isEmpty) continue;
-          parts.add(content);
+      final latest = conversation == null
+          ? null
+          : chatService.getConversation(conversation.id) ?? conversation;
+      final rawState = latest?.extras[WorldBookActivation.extrasKey];
+      final previous = rawState is Map
+          ? Map<String, dynamic>.from(rawState)
+          : <String, dynamic>{};
+      bool isChatMessage(ChatMessage message) =>
+          (message.role == 'user' || message.role == 'assistant') &&
+          (!message.isStreaming ||
+              message.content.trim().isNotEmpty ||
+              message.parts.any((part) => part is! TextPart));
+      var historyMessages = sourceMessages?.where(isChatMessage).toList();
+      final usesTiming = books.any(
+        (book) => book.entries.any(
+          (entry) =>
+              entry.enabled &&
+              (entry.sticky > 0 || entry.cooldown > 0 || entry.delay > 0),
+        ),
+      );
+      // Generation can hand us a bounded context window. Timers count the whole
+      // selected conversation through this request's last message, including on
+      // regeneration; future messages and the empty reply placeholder do not count.
+      if (usesTiming &&
+          conversation != null &&
+          historyMessages != null &&
+          historyMessages.isNotEmpty &&
+          chatService.initialized) {
+        final fullHistory = await chatService.loadSelectedContextMessages(
+          conversation.id,
+          truncateIndex: -1,
+          limit: await chatService.resolveMessageCount(conversation.id),
+          throughRevisionId: historyMessages.last.id,
+        );
+        if (fullHistory.isNotEmpty) {
+          historyMessages = fullHistory.where(isChatMessage).toList();
         }
-        return parts.reversed.join('\n');
       }
-
-      bool isTriggered(WorldBookEntry entry, String context) {
-        if (!entry.enabled) return false;
-        if (entry.constantActive) return true;
-        if (entry.keywords.isEmpty) return false;
-
-        for (final raw in entry.keywords) {
-          final keyword = raw.trim();
-          if (keyword.isEmpty) continue;
-
-          if (entry.useRegex) {
-            try {
-              final re = RegExp(keyword, caseSensitive: entry.caseSensitive);
-              if (re.hasMatch(context)) return true;
-            } catch (_) {}
+      final result = WorldBookActivation.evaluate(
+        books: books,
+        scanMessages: apiMessages,
+        history: historyMessages == null
+            ? [
+                for (final message in apiMessages)
+                  if ((message['role'] == 'user' ||
+                          message['role'] == 'assistant') &&
+                      message['tool_calls'] == null &&
+                      (message['content'] ?? '').toString().trim().isNotEmpty)
+                    {'role': message['role'], 'content': message['content']},
+              ]
+            : [
+                for (final message in historyMessages)
+                  {
+                    'role': message.role,
+                    'content': message.content,
+                    'attachments': [
+                      for (final part in message.parts)
+                        if (part is ImagePart || part is FilePart)
+                          part.encodePayload(),
+                    ],
+                  },
+              ],
+        previous: previous,
+      );
+      if (persistActivation &&
+          conversation != null &&
+          ((result.state['effects'] as Map).isNotEmpty ||
+              previous.isNotEmpty)) {
+        await chatService.updateConversationExtras(conversation.id, (extras) {
+          final next = Map<String, dynamic>.from(extras);
+          if ((result.state['effects'] as Map).isEmpty) {
+            next.remove(WorldBookActivation.extrasKey);
           } else {
-            if (entry.caseSensitive) {
-              if (context.contains(keyword)) return true;
-            } else {
-              if (context.toLowerCase().contains(keyword.toLowerCase())) {
-                return true;
-              }
-            }
+            next[WorldBookActivation.extrasKey] = result.state;
           }
-        }
-        return false;
+          return next;
+        });
       }
-
-      final contextCache = <int, String>{};
-      final triggered = <({WorldBookEntry entry, int seq})>[];
-      int seq = 0;
-
-      for (final book in books) {
-        for (final entry in book.entries) {
-          final depth = (entry.scanDepth <= 0 ? 1 : entry.scanDepth)
-              .clamp(1, 200)
-              .toInt();
-          final ctx = contextCache.putIfAbsent(
-            depth,
-            () => extractContextForDepth(depth),
-          );
-          if (isTriggered(entry, ctx)) {
-            triggered.add((entry: entry, seq: seq));
-          }
-          seq++;
-        }
-      }
-
+      final triggered = result.entries;
       if (triggered.isEmpty) return;
-
-      triggered.sort((a, b) {
-        final pa = a.entry.priority;
-        final pb = b.entry.priority;
-        if (pb != pa) return pb.compareTo(pa);
-        return a.seq.compareTo(b.seq);
-      });
 
       String wrapSystemTag(String content) => '<system>\n$content\n</system>';
 
@@ -1653,9 +2184,7 @@ class MessageBuilderService {
 
       final byPosition = <WorldBookInjectionPosition, List<WorldBookEntry>>{};
       for (final t in triggered) {
-        byPosition
-            .putIfAbsent(t.entry.position, () => <WorldBookEntry>[])
-            .add(t.entry);
+        byPosition.putIfAbsent(t.position, () => <WorldBookEntry>[]).add(t);
       }
 
       // BEFORE/AFTER_SYSTEM_PROMPT: merge into system message.

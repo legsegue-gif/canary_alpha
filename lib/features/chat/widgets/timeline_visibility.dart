@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import '../../../shared/widgets/markdown_line_lexer.dart';
+import '../../../utils/mcp_structured_image.dart';
 import '../../home/services/ask_user_interaction_service.dart';
 import '../../home/services/local_tools_service.dart';
 import 'screen_time_tool_ui.dart';
+import 'weather_tool_ui.dart';
 
 /// Built-in search is cited elsewhere and must not create a timeline card.
 const String kBuiltinSearchToolName = 'builtin_search';
@@ -37,44 +41,219 @@ class PendingApprovalKey {
   int get hashCode => Object.hash(conversationId, toolCallId);
 }
 
-/// Extract markdown images from a tool result. Matches `![alt](url)` only.
-(String, List<String>) parseToolResultImages(String? content) {
-  if (content == null || content.isEmpty) return ('', const []);
+/// Extract markdown images from a tool result.
+///
+/// Only `![alt](url)` lines that occupy an entire line are treated as
+/// attachments. Images inside JSON strings, fenced code, or body paragraphs
+/// stay in the text. Destinations may contain spaces and parentheses.
+(String, List<String>) parseToolResultImages(
+  String? content, {
+  Map<String, dynamic>? metadata,
+}) {
+  if (content == null || content.isEmpty) {
+    final typed = readMcpResultMetadata(metadata);
+    if (typed != null) {
+      return ('', dedupeImageUrisFirstSeen(mcpResultImageUris(typed)));
+    }
+    return ('', const []);
+  }
+
+  final typed = readMcpResultMetadata(metadata);
+  if (typed != null) {
+    final images = dedupeImageUrisFirstSeen(mcpResultImageUris(typed));
+    return (_stripStandaloneToolImages(content), images);
+  }
+
+  final envelope = tryDecodeLegacyMcpToolResultEnvelope(content);
+  if (envelope != null) {
+    return (
+      (envelope.legacyBody ?? envelope.markdown).trim(),
+      dedupeImageUrisFirstSeen(envelope.imageUris),
+    );
+  }
 
   final images = <String>[];
-  final buffer = StringBuffer();
-  var i = 0;
-  while (i < content.length) {
-    if (content.startsWith('![', i)) {
-      final altClose = content.indexOf('](', i + 2);
-      if (altClose != -1) {
-        final destStart = altClose + 2;
-        var depth = 1;
-        var j = destStart;
-        while (j < content.length && depth > 0) {
-          final ch = content.codeUnitAt(j);
-          if (ch == 0x28) {
-            depth += 1;
-          } else if (ch == 0x29) {
-            depth -= 1;
-            if (depth == 0) break;
-          }
-          j += 1;
-        }
-        if (depth == 0 && j < content.length) {
-          final path = content.substring(destStart, j).trim();
-          if (path.isNotEmpty && path != 'generated') {
-            images.add(path);
-          }
-          i = j + 1;
-          continue;
-        }
-      }
+  final seen = <String>{};
+  final kept = <String>[];
+  final lexer = MarkdownLineLexer();
+
+  for (final line in _toolResultLogicalLines(content)) {
+    // Old saved rows only. Typed ImageContent is never a private marker now.
+    final structured = decodeMcpStructuredImageLine(line);
+    if (structured != null) {
+      if (seen.add(structured)) images.add(structured);
+      continue;
     }
-    buffer.writeCharCode(content.codeUnitAt(i));
-    i += 1;
+    if (_isIndentedCodeLine(line)) {
+      kept.add(line);
+      continue;
+    }
+    if (lexer.consumeFence(line)) {
+      kept.add(line);
+      continue;
+    }
+    final classified = _classifyStandaloneMarkdownImageLine(line.trim());
+    switch (classified.kind) {
+      case _ImageLineKind.image:
+        final path = classified.path;
+        if (path != null && seen.add(path)) images.add(path);
+        continue;
+      case _ImageLineKind.placeholder:
+        continue;
+      case _ImageLineKind.notImage:
+        kept.add(line);
+    }
   }
-  return (buffer.toString().trim(), images);
+  return (kept.join('\n').trim(), images);
+}
+
+String _stripStandaloneToolImages(String content) {
+  final kept = <String>[];
+  final lexer = MarkdownLineLexer();
+  for (final line in _toolResultLogicalLines(content)) {
+    if (_isIndentedCodeLine(line) || lexer.consumeFence(line)) {
+      kept.add(line);
+      continue;
+    }
+    final classified = _classifyStandaloneMarkdownImageLine(line.trim());
+    if (classified.kind == _ImageLineKind.notImage) {
+      kept.add(line);
+    }
+  }
+  return kept.join('\n').trim();
+}
+
+enum _ImageLineKind { notImage, placeholder, image }
+
+class _ClassifiedImageLine {
+  const _ClassifiedImageLine(this.kind, [this.path]);
+
+  final _ImageLineKind kind;
+  final String? path;
+}
+
+bool _isIndentedCodeLine(String line) => _leadingIndentColumns(line) >= 4;
+
+int _leadingIndentColumns(String line) {
+  var columns = 0;
+  for (var i = 0; i < line.length; i++) {
+    final unit = line.codeUnitAt(i);
+    if (unit == 0x20) {
+      columns += 1;
+    } else if (unit == 0x09) {
+      columns += 4 - (columns % 4);
+    } else {
+      break;
+    }
+  }
+  return columns;
+}
+
+Iterable<String> _toolResultLogicalLines(String content) sync* {
+  var i = 0;
+  final end = content.length;
+  while (i < end) {
+    var lineEnd = i;
+    while (lineEnd < end &&
+        !markdownIsLogicalLineBreak(content.codeUnitAt(lineEnd))) {
+      lineEnd++;
+    }
+    yield content.substring(i, lineEnd);
+    if (lineEnd >= end) return;
+    if (content.codeUnitAt(lineEnd) == 0x0D &&
+        lineEnd + 1 < end &&
+        content.codeUnitAt(lineEnd + 1) == 0x0A) {
+      i = lineEnd + 2;
+    } else {
+      i = lineEnd + 1;
+    }
+  }
+}
+
+@visibleForTesting
+({String? path, bool placeholder}) debugClassifyStandaloneImageLine(
+  String trimmedLine,
+) {
+  final classified = _classifyStandaloneMarkdownImageLine(trimmedLine);
+  return (
+    path: classified.path,
+    placeholder: classified.kind == _ImageLineKind.placeholder,
+  );
+}
+
+_ClassifiedImageLine _classifyStandaloneMarkdownImageLine(String trimmedLine) {
+  if (!trimmedLine.startsWith('![')) {
+    return const _ClassifiedImageLine(_ImageLineKind.notImage);
+  }
+  final altClose = trimmedLine.indexOf('](');
+  if (altClose == -1) {
+    return const _ClassifiedImageLine(_ImageLineKind.notImage);
+  }
+  final destStart = altClose + 2;
+  final parsed = _readMarkdownImageDestination(trimmedLine, destStart);
+  if (parsed == null) {
+    return const _ClassifiedImageLine(_ImageLineKind.notImage);
+  }
+  final raw = parsed.trim();
+  if (raw.isEmpty || raw == 'generated') {
+    return const _ClassifiedImageLine(_ImageLineKind.placeholder);
+  }
+  return _ClassifiedImageLine(
+    _ImageLineKind.image,
+    decodeMarkdownImageDestination(raw),
+  );
+}
+
+/// Returns the raw destination (including `<>` if used) when the destination
+/// occupies the rest of the line and closes at the final `)`.
+String? _readMarkdownImageDestination(String line, int destStart) {
+  if (destStart >= line.length) return null;
+  if (line.codeUnitAt(destStart) == 0x3C) {
+    var j = destStart + 1;
+    while (j < line.length) {
+      final ch = line.codeUnitAt(j);
+      if (ch == 0x5C && j + 1 < line.length) {
+        j += 2;
+        continue;
+      }
+      if (ch == 0x3E) {
+        if (j + 1 == line.length - 1 && line.codeUnitAt(j + 1) == 0x29) {
+          return line.substring(destStart, j + 1);
+        }
+        return null;
+      }
+      j += 1;
+    }
+    return null;
+  }
+  var depth = 1;
+  var j = destStart;
+  while (j < line.length && depth > 0) {
+    final ch = line.codeUnitAt(j);
+    if (ch == 0x28 && !_isEscapedByOddBackslashes(line, j)) {
+      depth += 1;
+    } else if (ch == 0x29 && !_isEscapedByOddBackslashes(line, j)) {
+      depth -= 1;
+      if (depth == 0) break;
+    }
+    j += 1;
+  }
+  if (depth != 0 || j != line.length - 1) return null;
+  return line.substring(destStart, j);
+}
+
+bool _isEscapedByOddBackslashes(String text, int index) {
+  var slashes = 0;
+  for (var i = index - 1; i >= 0 && text.codeUnitAt(i) == 0x5C; i--) {
+    slashes += 1;
+  }
+  return slashes.isOdd;
+}
+
+/// Unescape destinations using the shared Markdown / Windows path codec.
+@visibleForTesting
+String unescapeMarkdownDestination(String raw) {
+  return decodeMarkdownImageDestination(raw);
 }
 
 /// Whether [toolName] is allowed to occupy a chain-of-thought step.
@@ -155,13 +334,37 @@ List<List<T>> splitToolsIntoTimelineBlocks<T>(
   return blocks.isEmpty ? <List<T>>[List<T>.of(tools)] : blocks;
 }
 
+/// Workspace tools that use the 44px timeline-step shell plus an inline body.
+const Set<String> _workspaceToolNames = {
+  'shell',
+  'read_file',
+  'write_file',
+  'edit_file',
+  'list_dir',
+  'glob',
+  'grep',
+};
+
+/// Second line under the workspace tool title (path / command / pattern).
+const double kEstimateWorkspaceSummaryLine = 16.0;
+
+/// Gap plus [WorkspaceFileChip] row under a workspace tool header.
+const double kEstimateWorkspaceChipRow = 38.0;
+
+/// One stdout/stderr tail line (12px / 1.4).
+const double kEstimateWorkspaceTailLine = 17.0;
+
+/// Environment-not-ready notice plus install button.
+const double kEstimateWorkspaceEnvNotice = 36.0;
+
 /// Extra height under a collapsed tool header. Not gated on the normal
-/// four-line summary flag — ask-user, TTS, Screen Time, images, and pending
-/// approval each have their own structure.
+/// four-line summary flag — ask-user, TTS, Screen Time, images, pending
+/// approval, and workspace tool bodies each have their own structure.
 double estimateToolExtraHeight({
   required String toolName,
   required Map<String, dynamic> arguments,
   required String? content,
+  Map<String, dynamic>? metadata,
   required bool showToolResultSummary,
   required bool hideToolResultImages,
   required bool pendingApproval,
@@ -193,7 +396,10 @@ double estimateToolExtraHeight({
     return _estimateTtsReplayRowHeight * fontScale.clamp(0.85, 1.4);
   }
 
-  final (cleanText, imagePaths) = parseToolResultImages(content);
+  final (cleanText, imagePaths) = parseToolResultImages(
+    content,
+    metadata: metadata,
+  );
   if (toolName == LocalToolNames.screenTime) {
     final screenTime = ScreenTimeResult.tryParse(cleanText);
     if (screenTime != null &&
@@ -201,8 +407,23 @@ double estimateToolExtraHeight({
       return _estimateScreenTimeExtra(screenTime, fontScale);
     }
   }
+  if (toolName == LocalToolNames.weather) {
+    final weather = WeatherToolResult.tryParse(cleanText);
+    if (weather != null && !weather.isError) {
+      return _estimateWeatherExtra(weather, fontScale);
+    }
+  }
 
   var extra = 0.0;
+  final isWorkspace = _workspaceToolNames.contains(toolName);
+  if (isWorkspace) {
+    extra += _estimateWorkspaceToolCardExtra(
+      toolName: toolName,
+      arguments: arguments,
+      content: content,
+      metadata: metadata,
+    );
+  }
   final summaryFontSize = 12.0 * fontScale;
   final summaryLineHeight = summaryFontSize * 1.4;
   var hasSummary = false;
@@ -216,7 +437,7 @@ double estimateToolExtraHeight({
       wrappedLineCount: wrappedLineCount,
     );
     hasSummary = showToolResultSummary;
-  } else if (showToolResultSummary) {
+  } else if (showToolResultSummary && !isWorkspace) {
     final summary = cleanText.trim();
     if (summary.isNotEmpty) {
       final charWidth = summaryFontSize * 0.55;
@@ -241,6 +462,99 @@ double estimateToolExtraHeight({
   return extra;
 }
 
+/// Height the workspace tool body adds beyond the 44px timeline-step shell.
+double _estimateWorkspaceToolCardExtra({
+  required String toolName,
+  required Map<String, dynamic> arguments,
+  required String? content,
+  Map<String, dynamic>? metadata,
+}) {
+  final path = _workspaceEstimatePath(arguments, metadata);
+  final command = (arguments['command'] ?? '').toString().trim();
+  final pattern = (arguments['pattern'] ?? '').toString().trim();
+  final hasSummary = switch (toolName) {
+    'shell' => command.isNotEmpty,
+    'glob' || 'grep' => pattern.isNotEmpty || path.isNotEmpty,
+    _ => path.isNotEmpty,
+  };
+  var extra = hasSummary ? kEstimateWorkspaceSummaryLine : 0.0;
+
+  if (toolName == 'shell') {
+    final tail = _workspaceEstimateTailLineCount(content, metadata);
+    if (tail > 0) extra += tail * kEstimateWorkspaceTailLine;
+  } else {
+    final hasChips = switch (toolName) {
+      'read_file' || 'write_file' || 'edit_file' => path.isNotEmpty,
+      'list_dir' =>
+        path.isNotEmpty || _workspaceEstimateHasResultPaths(content, metadata),
+      'glob' || 'grep' => _workspaceEstimateHasResultPaths(content, metadata),
+      _ => false,
+    };
+    if (hasChips) extra += kEstimateWorkspaceChipRow;
+  }
+  if (_workspaceEstimateEnvNotReady(metadata)) {
+    extra += kEstimateWorkspaceEnvNotice;
+  }
+  return extra;
+}
+
+String _workspaceEstimatePath(
+  Map<String, dynamic> arguments,
+  Map<String, dynamic>? metadata,
+) {
+  final fromMeta = _workspaceMetaString(metadata, 'path');
+  if (fromMeta.isNotEmpty) return fromMeta;
+  final path = (arguments['path'] ?? '').toString().trim();
+  if (path.isNotEmpty) return path;
+  return (arguments['pattern'] ?? '').toString().trim();
+}
+
+String _workspaceMetaString(Map<String, dynamic>? metadata, String key) {
+  if (metadata == null) return '';
+  final nested = metadata['workspace'];
+  final map = nested is Map ? nested : metadata;
+  return (map[key] ?? '').toString().trim();
+}
+
+bool _workspaceEstimateHasResultPaths(
+  String? content,
+  Map<String, dynamic>? metadata,
+) {
+  final nested = metadata?['workspace'];
+  final map = nested is Map ? nested : metadata;
+  final files = map?['files'];
+  if (files is List && files.isNotEmpty) return true;
+  if (content == null || content.isEmpty) return false;
+  return const LineSplitter()
+      .convert(content)
+      .any((line) => line.isNotEmpty && !line.startsWith('...'));
+}
+
+int _workspaceEstimateTailLineCount(
+  String? content,
+  Map<String, dynamic>? metadata,
+) {
+  final preview = _workspaceMetaString(metadata, 'stdoutPreview');
+  final stderr = _workspaceMetaString(metadata, 'stderrPreview');
+  final text = preview.isNotEmpty
+      ? preview
+      : (stderr.isNotEmpty ? stderr : (content ?? ''));
+  if (text.isEmpty) return 0;
+  final lines = const LineSplitter()
+      .convert(text)
+      .where((line) => line.isNotEmpty)
+      .toList();
+  if (lines.isEmpty) return 0;
+  return lines.length > 4 ? 4 : lines.length;
+}
+
+bool _workspaceEstimateEnvNotReady(Map<String, dynamic>? metadata) {
+  if (metadata == null) return false;
+  final nested = metadata['workspace'];
+  final map = nested is Map ? nested : metadata;
+  return map['status'] == 'error' && map['code'] == 'environment_not_ready';
+}
+
 const double _estimateTtsReplayRowHeight = 36;
 const double _estimateToolImageHeight = 120;
 const double _estimateToolImageSummaryGap = 8;
@@ -251,7 +565,7 @@ const double _estimateAskUserSubmitHeight = 38;
 const double _estimateAskUserAnsweredGap = 3;
 const double _estimateAskUserAnsweredPad = 4;
 
-/// Matches [_AskUserOptionRow]: 13px / 1.25, max 3 lines, minHeight 40.
+/// Matches [_AskUserOptionRow]: 13px / 1.25, unlimited lines, minHeight 40.
 double _estimateAskUserOptionRowHeight(
   String label, {
   required double textWidth,
@@ -264,7 +578,6 @@ double _estimateAskUserOptionRowHeight(
     fontSize: fontSize,
     height: 1.25,
     maxWidth: optionTextWidth,
-    maxLines: 3,
     fontWeight: FontWeight.w500,
   );
   return math.max(
@@ -278,7 +591,6 @@ double _askUserLayoutHeight(
   required double fontSize,
   required double height,
   required double maxWidth,
-  int? maxLines,
   FontWeight? fontWeight,
 }) {
   if (text.trim().isEmpty) return fontSize * height;
@@ -292,8 +604,6 @@ double _askUserLayoutHeight(
       ),
     ),
     textDirection: TextDirection.ltr,
-    maxLines: maxLines,
-    ellipsis: maxLines == null ? null : '…',
   )..layout(maxWidth: math.max(1.0, maxWidth));
   try {
     return math.max(fontSize * height, painter.height);
@@ -418,6 +728,12 @@ double _estimateScreenTimeExtra(ScreenTimeResult result, double fontScale) {
   if (result.isNoPermission) return line;
   final apps = result.apps.length.clamp(0, 3);
   return line + apps * (line + 2);
+}
+
+double _estimateWeatherExtra(WeatherToolResult result, double fontScale) {
+  if (!result.hasCurrent) return 0;
+  final line = 16.0 * fontScale;
+  return line * 2;
 }
 
 double _estimatePendingApprovalExtra(

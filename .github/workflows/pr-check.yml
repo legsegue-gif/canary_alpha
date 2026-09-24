@@ -1,14 +1,11 @@
 name: PR Checks
 
 env:
-  FLUTTER_VERSION: '3.44.6'
+  FLUTTER_VERSION: '3.44.9'
 
 on:
   pull_request:
-    branches: [main, baseline]
-  # analyze 与 test 只存在于本 workflow，build workflow 里没有任何检查步骤。
-  # 没有手动触发就必须开 PR 才能跑测试。
-  workflow_dispatch:
+    branches: [master]
 
 jobs:
   checks:
@@ -17,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -27,17 +24,6 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-
-      # lib/secrets/fallback.dart 被 .gitignore 排除，却被 model_provider.dart:11
-      # 和 chat_api_service.dart:16 import。所有 build workflow 都有这一步，
-      # 唯独 pr-check.yml 漏了 —— 缺它，下面的 dart analyze --fatal-infos 必然失败。
-      - name: Inject fallback
-        shell: bash
-        run: |
-          mkdir -p lib/secrets
-          cat > lib/secrets/fallback.dart <<'EOF'
-          const String siliconflowFallbackKey = '${{ secrets.SILICONFLOW_KEY }}';
-          EOF
 
       - name: Flutter pub get
         run: flutter pub get
@@ -54,16 +40,9 @@ jobs:
             HEAD_SHA="${{ github.sha }}"
           fi
 
-          # 正则里是 \.dart$ 而不是 \\.dart$：YAML 块标量不处理反斜杠转义，
-          # shell 单引号里也原样，所以 ERE 会原封收到写下的内容。写成 \\.
-          # 就是「匹配一个字面反斜杠字符」，路径里不可能有，files 恒为空，
-          # 于是这道门禁一直静默 exit 0 —— 一个 3 万行的 PR 也报「没有改动
-          # 的 Dart 文件」。
-          files="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | grep -E '^(lib|test)/.*\.dart$' || true)"
+          files="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | grep -E '^(lib|test|integration_test)/.*\.dart$' || true)"
           if [ -z "$files" ]; then
-            # 这里要能区分「真的没有 Dart 改动」和「筛选器又坏了」。
-            total="$(git diff --diff-filter=ACMR --name-only "$BASE_SHA" "$HEAD_SHA" -- | wc -l | tr -d ' ')"
-            echo "No changed Dart files to format-check. (本次改动共 $total 个文件)"
+            echo "No changed Dart files to format-check."
             exit 0
           fi
 
@@ -100,7 +79,7 @@ jobs:
             "desiredFileName.txt"
 
       - name: dart analyze (root package only)
-        run: dart analyze --fatal-infos lib test
+        run: dart analyze --fatal-infos lib test integration_test
 
       - name: flutter test
         run: flutter test

@@ -15,6 +15,8 @@ import '../../../theme/theme_factory.dart';
 import '../../../utils/brand_assets.dart';
 import 'search_api_keys_page.dart';
 import 'package:Canary/theme/app_semantic_colors.dart';
+import 'package:Canary/shared/widgets/ios_tactile.dart';
+import 'package:Canary/shared/widgets/section_card.dart';
 
 class SearchServiceEditorResult {
   const SearchServiceEditorResult.saved(this.service) : deleted = false;
@@ -178,8 +180,7 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
                         l10n.searchServiceEditorProviderTypeTitle,
                         first: true,
                       ),
-                      _sectionCard(
-                        context,
+                      SectionCard(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Wrap(
@@ -229,8 +230,7 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
   ) {
     final fields = _configurationFields(context, service);
     final cs = Theme.of(context).colorScheme;
-    return _sectionCard(
-      context,
+    return SectionCard(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
         child: Column(
@@ -573,6 +573,143 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
         field(key: 'excludeDomains', label: 'Exclude domains'),
       ];
     }
+    if (service is AnySearchOptions) {
+      return [
+        field(
+          key: 'apiKey',
+          label: l10n.searchServicesDialogApiKey,
+          obscure: true,
+        ),
+        _buildMultiKeyEntry(context),
+        field(
+          key: 'url',
+          label: l10n.searchServicesFieldCustomUrlOptional,
+          hint: AnySearchOptions.defaultUrl,
+          keyboardType: TextInputType.url,
+        ),
+      ];
+    }
+    if (service is ParallelOptions) {
+      return [
+        field(
+          key: 'apiKey',
+          label: l10n.searchServicesDialogApiKey,
+          obscure: true,
+          validator: requiredApiKey,
+        ),
+        _buildMultiKeyEntry(context),
+        _SearchEditorDropdown(
+          key: const ValueKey('search-service-field-mode'),
+          label: l10n.searchServicesDialogSearchMode,
+          value: ParallelOptions.normalizeMode(_text('mode')),
+          items: [
+            for (final mode in ParallelOptions.modes)
+              (value: mode, label: ParallelOptions.modeLabel(mode)),
+          ],
+          onChanged: (value) {
+            _controller('mode').text = value;
+            _markDirty();
+          },
+        ),
+      ];
+    }
+    if (service is KimiOptions) {
+      return [
+        field(
+          key: 'apiKey',
+          label: l10n.searchServicesDialogApiKey,
+          obscure: true,
+          validator: requiredApiKey,
+        ),
+        _buildMultiKeyEntry(context),
+        _SearchEditorDropdown(
+          key: const ValueKey('search-service-field-mode'),
+          label: l10n.searchServicesDialogSearchMode,
+          value: KimiOptions.normalizeMode(_text('mode')),
+          items: [
+            for (final mode in KimiOptions.modes)
+              (value: mode, label: KimiOptions.modeLabel(mode)),
+          ],
+          onChanged: (value) {
+            _controller('mode').text = value;
+            _markDirty();
+          },
+        ),
+      ];
+    }
+    if (service is YouSearchOptions) {
+      return [
+        field(
+          key: 'apiKey',
+          label: l10n.searchServicesDialogApiKey,
+          obscure: true,
+          validator: requiredApiKey,
+        ),
+        _buildMultiKeyEntry(context),
+        _SearchEditorDropdown(
+          key: const ValueKey('search-service-field-contentMode'),
+          label: l10n.searchServicesDialogContentMode,
+          value: YouSearchOptions.normalizeContentMode(_text('contentMode')),
+          items: [
+            (
+              value: YouSearchOptions.highlightsMode,
+              label: l10n.searchServicesDialogHighlights,
+            ),
+            (
+              value: YouSearchOptions.snippetsMode,
+              label: l10n.searchServicesDialogSnippets,
+            ),
+          ],
+          onChanged: (value) {
+            _controller('contentMode').text = value;
+            _markDirty();
+          },
+        ),
+      ];
+    }
+    if (service is BraveOptions) {
+      final mode = BraveOptions.normalizeMode(_text('mode'));
+      return [
+        field(
+          key: 'apiKey',
+          label: l10n.searchServicesDialogApiKey,
+          obscure: true,
+          validator: requiredApiKey,
+        ),
+        _buildMultiKeyEntry(context),
+        _SearchEditorDropdown(
+          key: const ValueKey('search-service-field-mode'),
+          label: l10n.searchServicesDialogSearchMode,
+          value: mode,
+          items: [
+            (
+              value: BraveOptions.webMode,
+              label: l10n.searchServicesDialogWebSearch,
+            ),
+            (
+              value: BraveOptions.llmContextMode,
+              label: l10n.searchServicesDialogLlmContext,
+            ),
+          ],
+          onChanged: (value) {
+            _controller('mode').text = value;
+            _markDirty();
+          },
+        ),
+        if (mode == BraveOptions.llmContextMode)
+          field(
+            key: 'maximumNumberOfTokens',
+            label: l10n.searchServicesDialogMaximumTokens,
+            hint: '${BraveOptions.defaultMaximumNumberOfTokens}',
+            keyboardType: TextInputType.number,
+            validator: (value) {
+              return BraveOptions.isValidMaximumNumberOfTokensInput(value)
+                  ? null
+                  : l10n.searchServicesDialogMaximumTokensInvalid;
+            },
+          ),
+      ];
+    }
 
     return [
       field(
@@ -687,8 +824,7 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
     final l10n = AppLocalizations.of(context)!;
     final cs = Theme.of(context).colorScheme;
     final canRun = !_testing && _queryController.text.trim().isNotEmpty;
-    return _sectionCard(
-      context,
+    return SectionCard(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
         child: Column(
@@ -1059,6 +1195,11 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
       _putController('apiKey', service.apiKey);
     } else if (service is BraveOptions) {
       _putController('apiKey', service.apiKey);
+      _putController('mode', service.mode);
+      _putController(
+        'maximumNumberOfTokens',
+        '${service.maximumNumberOfTokens}',
+      );
     } else if (service is MetasoOptions) {
       _putController('apiKey', service.apiKey);
     } else if (service is OllamaOptions) {
@@ -1070,6 +1211,8 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
     } else if (service is BochaOptions) {
       _putController('apiKey', service.apiKey);
     } else if (service is DoubaoOptions) {
+      _putController('apiKey', service.apiKey);
+    } else if (service is KagiOptions) {
       _putController('apiKey', service.apiKey);
     } else if (service is SerperOptions) {
       _putController('apiKey', service.apiKey);
@@ -1106,6 +1249,18 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
       _putController('language', service.language);
       _putController('includeDomains', service.includeDomains);
       _putController('excludeDomains', service.excludeDomains);
+    } else if (service is AnySearchOptions) {
+      _putController('apiKey', service.apiKey);
+      _putController('url', service.url);
+    } else if (service is ParallelOptions) {
+      _putController('apiKey', service.apiKey);
+      _putController('mode', service.mode);
+    } else if (service is KimiOptions) {
+      _putController('apiKey', service.apiKey);
+      _putController('mode', service.mode);
+    } else if (service is YouSearchOptions) {
+      _putController('apiKey', service.apiKey);
+      _putController('contentMode', service.contentMode);
     }
   }
 
@@ -1173,6 +1328,10 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
           id: _serviceId,
           apiKey: _text('apiKey'),
           extraApiKeys: _extraApiKeys,
+          mode: BraveOptions.normalizeMode(_text('mode')),
+          maximumNumberOfTokens: BraveOptions.normalizeMaximumNumberOfTokens(
+            _text('maximumNumberOfTokens'),
+          ),
         );
       case 'metaso':
         return MetasoOptions(
@@ -1217,6 +1376,12 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
         );
       case 'doubao':
         return DoubaoOptions(
+          id: _serviceId,
+          apiKey: _text('apiKey'),
+          extraApiKeys: _extraApiKeys,
+        );
+      case 'kagi':
+        return KagiOptions(
           id: _serviceId,
           apiKey: _text('apiKey'),
           extraApiKeys: _extraApiKeys,
@@ -1283,6 +1448,36 @@ class _SearchServiceEditorPageState extends State<SearchServiceEditorPage> {
           includeDomains: _text('includeDomains'),
           excludeDomains: _text('excludeDomains'),
         );
+      case 'anysearch':
+        return AnySearchOptions(
+          id: _serviceId,
+          apiKey: _text('apiKey'),
+          extraApiKeys: _extraApiKeys,
+          url: _text('url'),
+        );
+      case 'parallel':
+        return ParallelOptions(
+          id: _serviceId,
+          apiKey: _text('apiKey'),
+          extraApiKeys: _extraApiKeys,
+          mode: ParallelOptions.normalizeMode(_text('mode')),
+        );
+      case 'kimi':
+        return KimiOptions(
+          id: _serviceId,
+          apiKey: _text('apiKey'),
+          extraApiKeys: _extraApiKeys,
+          mode: KimiOptions.normalizeMode(_text('mode')),
+        );
+      case 'you':
+        return YouSearchOptions(
+          id: _serviceId,
+          apiKey: _text('apiKey'),
+          extraApiKeys: _extraApiKeys,
+          contentMode: YouSearchOptions.normalizeContentMode(
+            _text('contentMode'),
+          ),
+        );
       case 'canary':
         return CanaryOptions(id: _serviceId);
       default:
@@ -1310,8 +1505,7 @@ class _SearchServiceUsageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final cs = Theme.of(context).colorScheme;
-    return _sectionCard(
-      context,
+    return SectionCard(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -1531,6 +1725,205 @@ String _formatUsageNumber(BuildContext context, num value) {
         ..minimumFractionDigits = 0
         ..maximumFractionDigits = 2;
   return format.format(value);
+}
+
+class _SearchEditorDropdown extends StatelessWidget {
+  const _SearchEditorDropdown({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String value;
+  final List<({String value, String label})> items;
+  final ValueChanged<String> onChanged;
+
+  String get _effectiveValue {
+    return items.any((item) => item.value == value) ? value : items.first.value;
+  }
+
+  String get _effectiveLabel {
+    for (final item in items) {
+      if (item.value == _effectiveValue) return item.label;
+    }
+    return items.first.label;
+  }
+
+  Future<void> _openPicker(BuildContext context) async {
+    final selected = await _showSearchEditorOptionSheet(
+      context,
+      title: label,
+      value: _effectiveValue,
+      items: items,
+    );
+    if (selected != null) onChanged(selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: AppFontWeights.semibold,
+            color: cs.onSurface.withValues(alpha: 0.72),
+          ),
+        ),
+        const SizedBox(height: 7),
+        SizedBox(
+          width: double.infinity,
+          child: IosCardPress(
+            haptics: false,
+            baseColor: context.appColors.surfaceCardFill,
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _openPicker(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _effectiveLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: AppFontWeights.medium,
+                        color: cs.onSurface.withValues(alpha: 0.92),
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Lucide.ChevronDown,
+                    size: 18,
+                    color: cs.onSurface.withValues(alpha: 0.5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<String?> _showSearchEditorOptionSheet(
+  BuildContext context, {
+  required String title,
+  required String value,
+  required List<({String value, String label})> items,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    backgroundColor: context.overlaySurface,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (ctx) {
+      final localCs = Theme.of(ctx).colorScheme;
+      return SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.7,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: localCs.onSurface.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: AppFontWeights.emphasis,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: SectionCard(
+                      children: [
+                        for (var i = 0; i < items.length; i++) ...[
+                          IosCardPress(
+                            haptics: false,
+                            baseColor: Colors.transparent,
+                            borderRadius: BorderRadius.zero,
+                            pressedBlendStrength: 0.08,
+                            pressedScale: 1.0,
+                            onTap: () => Navigator.of(ctx).pop(items[i].value),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      items[i].label,
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: items[i].value == value
+                                            ? AppFontWeights.semibold
+                                            : AppFontWeights.regular,
+                                        color: localCs.onSurface.withValues(
+                                          alpha: 0.9,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (items[i].value == value)
+                                    Icon(
+                                      Lucide.Check,
+                                      size: 18,
+                                      color: localCs.primary,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (i != items.length - 1)
+                            Divider(
+                              height: 6,
+                              thickness: 0.6,
+                              indent: 12,
+                              endIndent: 12,
+                              color: localCs.outlineVariant.withValues(
+                                alpha: 0.18,
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _SearchEditorTextField extends StatefulWidget {
@@ -2018,7 +2411,7 @@ InputDecoration _inputDecoration(
   Widget? suffix,
 }) {
   final cs = Theme.of(context).colorScheme;
-  final fieldBg = context.appColors.surfaceFill;
+  final fieldBg = context.appColors.surfaceCardFill;
   return InputDecoration(
     hintText: hint,
     isDense: true,
@@ -2051,25 +2444,6 @@ InputDecoration _inputDecoration(
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
     suffixIcon: suffix,
     suffixIconConstraints: const BoxConstraints.tightFor(width: 44, height: 44),
-  );
-}
-
-Widget _sectionCard(BuildContext context, {required Widget child}) {
-  final theme = Theme.of(context);
-  final cs = theme.colorScheme;
-  final isDark = theme.brightness == Brightness.dark;
-  final bg = context.appColors.surfaceCard;
-  return Container(
-    decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: cs.outlineVariant.withValues(alpha: isDark ? 0.08 : 0.06),
-        width: 0.6,
-      ),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: child,
   );
 }
 
@@ -2119,12 +2493,17 @@ String _typeForService(SearchServiceOptions service) {
   if (service is PerplexityOptions) return 'perplexity';
   if (service is BochaOptions) return 'bocha';
   if (service is DoubaoOptions) return 'doubao';
+  if (service is KagiOptions) return 'kagi';
   if (service is SerperOptions) return 'serper';
   if (service is QueritOptions) return 'querit';
   if (service is GrokOptions) return 'grok';
   if (service is StepFunOptions) return 'stepfun';
   if (service is FirecrawlOptions) return 'firecrawl';
   if (service is TinyFishOptions) return 'tinyfish';
+  if (service is AnySearchOptions) return 'anysearch';
+  if (service is ParallelOptions) return 'parallel';
+  if (service is KimiOptions) return 'kimi';
+  if (service is YouSearchOptions) return 'you';
   if (service is CanaryOptions) return 'canary';
   return 'bing_local';
 }
@@ -2164,6 +2543,8 @@ SearchServiceOptions _defaultService(String type, String id) {
       return BochaOptions(id: id, apiKey: '');
     case 'doubao':
       return DoubaoOptions(id: id, apiKey: '');
+    case 'kagi':
+      return KagiOptions(id: id, apiKey: '');
     case 'serper':
       return SerperOptions(id: id, apiKey: '');
     case 'querit':
@@ -2176,6 +2557,14 @@ SearchServiceOptions _defaultService(String type, String id) {
       return FirecrawlOptions(id: id, apiKey: '');
     case 'tinyfish':
       return TinyFishOptions(id: id, apiKey: '');
+    case 'anysearch':
+      return AnySearchOptions(id: id, apiKey: '');
+    case 'parallel':
+      return ParallelOptions(id: id, apiKey: '');
+    case 'kimi':
+      return KimiOptions(id: id, apiKey: '');
+    case 'you':
+      return YouSearchOptions(id: id, apiKey: '');
     case 'canary':
       return CanaryOptions(id: id);
     default:
@@ -2214,6 +2603,8 @@ String _serviceTypeName(BuildContext context, String type) {
       return l10n.searchServiceNameBocha;
     case 'doubao':
       return l10n.searchServiceNameDoubao;
+    case 'kagi':
+      return l10n.searchServiceNameKagi;
     case 'serper':
       return l10n.searchServiceNameSerper;
     case 'querit':
@@ -2226,6 +2617,14 @@ String _serviceTypeName(BuildContext context, String type) {
       return l10n.searchServiceNameFirecrawl;
     case 'tinyfish':
       return l10n.searchServiceNameTinyFish;
+    case 'anysearch':
+      return l10n.searchServiceNameAnySearch;
+    case 'parallel':
+      return l10n.searchServiceNameParallel;
+    case 'kimi':
+      return l10n.searchServiceNameKimi;
+    case 'you':
+      return l10n.searchServiceNameYou;
     case 'canary':
       return l10n.searchServiceNameCanary;
     default:
@@ -2248,12 +2647,17 @@ const _providerTypes = <({String type, String brand})>[
   (type: 'perplexity', brand: 'perplexity'),
   (type: 'bocha', brand: 'bocha'),
   (type: 'doubao', brand: 'doubao'),
+  (type: 'kagi', brand: 'kagi'),
   (type: 'serper', brand: 'serper'),
   (type: 'querit', brand: 'querit'),
   (type: 'grok', brand: 'grok'),
   (type: 'stepfun', brand: 'stepfun'),
   (type: 'firecrawl', brand: 'firecrawl'),
   (type: 'tinyfish', brand: 'tinyfish'),
+  (type: 'anysearch', brand: 'anysearch'),
+  (type: 'parallel', brand: 'parallel'),
+  (type: 'kimi', brand: 'kimi'),
+  (type: 'you', brand: 'you'),
 ];
 
 @Preview(
@@ -2279,6 +2683,36 @@ Widget searchServiceEditorPagePreview() {
     themeMode: ThemeMode.system,
     home: SearchServiceEditorPage(
       initialService: TavilyOptions(id: 'preview', apiKey: 'tvly-preview-key'),
+      commonOptions: const SearchCommonOptions(),
+      canDelete: true,
+      autoQueryUsage: false,
+    ),
+  );
+}
+
+@Preview(
+  name: 'AnySearch editor · Light',
+  group: 'Search services',
+  size: Size(390, 844),
+  brightness: Brightness.light,
+)
+@Preview(
+  name: 'AnySearch editor · Dark',
+  group: 'Search services',
+  size: Size(390, 844),
+  brightness: Brightness.dark,
+)
+Widget anySearchServiceEditorPagePreview() {
+  return MaterialApp(
+    debugShowCheckedModeBanner: false,
+    locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    theme: buildLightTheme(null),
+    darkTheme: buildDarkTheme(null),
+    themeMode: ThemeMode.system,
+    home: SearchServiceEditorPage(
+      initialService: AnySearchOptions(id: 'preview-anysearch', apiKey: ''),
       commonOptions: const SearchCommonOptions(),
       canDelete: true,
       autoQueryUsage: false,
