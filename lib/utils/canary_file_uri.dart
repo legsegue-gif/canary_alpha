@@ -104,9 +104,7 @@ final class CanaryFileUri {
   /// Known production bundle / package identifiers that own managed roots.
   /// Substring matches (e.g. `com.other.canary.notes`) are intentionally
   /// rejected — only exact whitelist entries count.
-  static const Set<String> _knownBundleIds = {
-    'app.canary.client',
-  };
+  static const Set<String> _knownBundleIds = {'app.canary.client'};
 
   /// Windows AppData folder name (Flutter BINARY_NAME). Compared
   /// case-insensitively as a whole segment — not a substring.

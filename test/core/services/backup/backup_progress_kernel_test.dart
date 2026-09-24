@@ -88,6 +88,15 @@ void main() {
   });
 
   group('runBackupIsolate', () {
+    test('debug native sleep restores the caller signal mask', () {
+      if (Platform.isWindows) return;
+
+      final before = _currentSignalMask();
+      debugNativeSleepIgnoringKill(0);
+
+      expect(_currentSignalMask(), before);
+    });
+
     test('processed is monotonic within a phase', () async {
       final events = <BackupProgress>[];
       await runBackupIsolate<int, int>(
@@ -100,7 +109,10 @@ void main() {
           .toList();
       expect(packing, isNotEmpty);
       for (var i = 1; i < packing.length; i++) {
-        expect(packing[i].processed, greaterThanOrEqualTo(packing[i - 1].processed));
+        expect(
+          packing[i].processed,
+          greaterThanOrEqualTo(packing[i - 1].processed),
+        );
       }
     });
 
@@ -148,7 +160,10 @@ void main() {
       );
       expect(await future, 'committed');
       expect(token.isCancelled, isFalse);
-      expect(DateTime.now().difference(started) < const Duration(seconds: 2), isTrue);
+      expect(
+        DateTime.now().difference(started) < const Duration(seconds: 2),
+        isTrue,
+      );
     });
 
     test(
@@ -157,12 +172,10 @@ void main() {
         final token = BackupCancelToken();
         final address = token.cellAddress;
 
-        // 不能靠 native 阻塞让 kill "自然"失效。nanosleep 循环每次被信号
-        // 打断都要回到 Dart 检查条件，那就是一个安全点，Linux 上
-        // Isolate.kill(immediate) 正好趁机生效，isolateExited 变成 true。
-        // macOS 看不出来 —— 那边 sleep 从不返回 Dart，永远到不了安全点。
-        // 用这个 test-only 开关直接跳过 kill，与平台无关；同文件的
-        // sqlite close handshake 测试一直就是这么做的。
+        // 「忽略 kill」由 test-only 开关保证，不依赖 native 阻塞在各平台上
+        // 能否挡住 Isolate.kill(immediate) —— 那取决于信号与安全点，
+        // Linux 与 macOS 行为不同。同文件的 sqlite close handshake 测试
+        // 也是这么做的。
         debugSkipBackupIsolateKill = true;
         addTearDown(() => debugSkipBackupIsolateKill = false);
 
@@ -196,8 +209,7 @@ void main() {
         addTearDown(token.dispose);
         final started = DateTime.now();
 
-        // 同上：这个测试名里的「ignores kill」必须由开关来保证，
-        // 靠 native 阻塞在 Linux 上做不到。
+        // 同上：测试名里的「ignores kill」由开关保证，与平台无关。
         debugSkipBackupIsolateKill = true;
         addTearDown(() => debugSkipBackupIsolateKill = false);
 
@@ -301,32 +313,35 @@ void main() {
       expect(interrupted, [handle]);
     });
 
-    test('cancel before handle registration still interrupts when it arrives', () async {
-      final interrupted = <int>[];
-      debugOnInterruptSqliteHandle = (address) {
-        expect(address, isNot(0));
-        interrupted.add(address);
-      };
-      addTearDown(() => debugOnInterruptSqliteHandle = null);
+    test(
+      'cancel before handle registration still interrupts when it arrives',
+      () async {
+        final interrupted = <int>[];
+        debugOnInterruptSqliteHandle = (address) {
+          expect(address, isNot(0));
+          interrupted.add(address);
+        };
+        addTearDown(() => debugOnInterruptSqliteHandle = null);
 
-      final token = BackupCancelToken();
-      addTearDown(token.dispose);
-      const handle = 0x1111aaaa;
-      final future = runBackupIsolate<void, int>(
-        body: _delayThenRegisterThenHang,
-        payload: handle,
-        cancelToken: token,
-        onProgress: (event) {
-          if (event.phase == BackupPhase.preparing) {
-            token.cancel();
-          }
-        },
-        killGrace: const Duration(milliseconds: 400),
-      );
+        final token = BackupCancelToken();
+        addTearDown(token.dispose);
+        const handle = 0x1111aaaa;
+        final future = runBackupIsolate<void, int>(
+          body: _delayThenRegisterThenHang,
+          payload: handle,
+          cancelToken: token,
+          onProgress: (event) {
+            if (event.phase == BackupPhase.preparing) {
+              token.cancel();
+            }
+          },
+          killGrace: const Duration(milliseconds: 400),
+        );
 
-      await expectLater(future, throwsA(isA<BackupCancelledException>()));
-      expect(interrupted, [handle]);
-    });
+        await expectLater(future, throwsA(isA<BackupCancelledException>()));
+        expect(interrupted, [handle]);
+      },
+    );
 
     test('cancel during VACUUM interrupts the open handle', () async {
       final interrupted = <int>[];
@@ -466,6 +481,23 @@ void main() {
   });
 }
 
+List<int> _currentSignalMask() {
+  const signalSetSize = 256;
+  final current = calloc<Uint8>(signalSetSize);
+  try {
+    final pthreadSigmask = DynamicLibrary.process()
+        .lookupFunction<
+          Int32 Function(Int32, Pointer<Void>, Pointer<Void>),
+          int Function(int, Pointer<Void>, Pointer<Void>)
+        >('pthread_sigmask');
+    final sigBlock = Platform.isMacOS || Platform.isIOS ? 1 : 0;
+    expect(pthreadSigmask(sigBlock, nullptr, current.cast()), 0);
+    return List<int>.of(current.asTypedList(signalSetSize));
+  } finally {
+    calloc.free(current);
+  }
+}
+
 Future<void> _registerThenHang(BackupIsolateContext context, int handle) async {
   context.registerSqliteInterruptHandle(handle);
   context.reportProgress(
@@ -519,7 +551,9 @@ Future<void> _nativeSleepThenCloseHandshake(
   try {
     _nativeSleepIgnoringKill(context, 2);
   } finally {
-    File('${args.closedMarkerPath}.resumed').writeAsStringSync('resumed', flush: true);
+    File(
+      '${args.closedMarkerPath}.resumed',
+    ).writeAsStringSync('resumed', flush: true);
     await context.waitForSqliteCloseAck();
     File(args.closedMarkerPath).writeAsStringSync('closed', flush: true);
   }
@@ -565,11 +599,7 @@ void _phaseOrderWork(BackupIsolateContext context, int payload) {
     BackupPhase.finalizing,
   ]) {
     context.reportProgress(
-      BackupProgress(
-        phase: phase,
-        processed: 0,
-        unit: BackupProgressUnit.none,
-      ),
+      BackupProgress(phase: phase, processed: 0, unit: BackupProgressUnit.none),
     );
   }
 }
@@ -608,48 +638,8 @@ String _nonCancellableThenCancelRace(
   return 'committed';
 }
 
-void _nativeSleepIgnoringKill(BackupIsolateContext context, int seconds) {
-  if (Platform.isWindows) {
-    DynamicLibrary.open('kernel32.dll')
-        .lookupFunction<Void Function(Uint32), void Function(int)>('Sleep')
-        .call(seconds * 1000);
-    return;
-  }
-  // 这个 helper 要模拟「isolate 卡在不可中断的 native 调用里」，不能用
-  // POSIX sleep()：它是**秒粒度**的。flutter_tester 在 Linux 上约每 1ms
-  // 发一个信号，实测 sleep(3)→2→1→0 三轮各 0ms，一秒没睡就"睡完"了；
-  // 循环重试也救不了，每轮的损失都被向下取整抹掉。
-  // macOS 看不到这个问题 —— libSystem 自己吃掉了 EINTR。
-  //
-  // nanosleep() 用 timespec 以纳秒粒度回填剩余时间，可以精确续睡。
-  final nanosleep = DynamicLibrary.process()
-      .lookupFunction<
-        Int32 Function(Pointer<_Timespec>, Pointer<_Timespec>),
-        int Function(Pointer<_Timespec>, Pointer<_Timespec>)
-      >('nanosleep');
-  final req = calloc<_Timespec>();
-  final rem = calloc<_Timespec>();
-  try {
-    req.ref.tvSec = seconds;
-    req.ref.tvNsec = 0;
-    while (nanosleep(req, rem) != 0) {
-      req.ref.tvSec = rem.ref.tvSec;
-      req.ref.tvNsec = rem.ref.tvNsec;
-    }
-  } finally {
-    calloc.free(req);
-    calloc.free(rem);
-  }
-}
-
-/// POSIX `struct timespec`，给 `nanosleep` 用。
-final class _Timespec extends Struct {
-  @Int64()
-  external int tvSec;
-
-  @Int64()
-  external int tvNsec;
-}
+void _nativeSleepIgnoringKill(BackupIsolateContext context, int seconds) =>
+    debugNativeSleepIgnoringKill(seconds);
 
 void _stuckHeartbeatLoop(BackupIsolateContext context, String path) {
   final file = File(path);

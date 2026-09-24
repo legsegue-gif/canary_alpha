@@ -13,21 +13,36 @@ import '../../../shared/widgets/ios_switch.dart';
 import '../../../shared/widgets/ios_tactile.dart';
 import '../../../core/services/haptics.dart';
 import '../../../theme/app_font_weights.dart';
+import 'package:Canary/theme/app_semantic_colors.dart';
+import '../../../shared/widgets/section_card.dart';
 
-Future<void> showSearchSettingsSheet(BuildContext context) async {
+/// [chatModelProviderKey]/[chatModelId] carry the model the chat actually
+/// sends with, resolved by the caller (conversation override -> assistant ->
+/// global default), so built-in-search support is judged against it.
+Future<void> showSearchSettingsSheet(
+  BuildContext context, {
+  String? chatModelProviderKey,
+  String? chatModelId,
+}) async {
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    backgroundColor: Theme.of(context).colorScheme.surface,
+    backgroundColor: context.overlaySurface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (ctx) => const _SearchSettingsSheet(),
+    builder: (ctx) => _SearchSettingsSheet(
+      chatModelProviderKey: chatModelProviderKey,
+      chatModelId: chatModelId,
+    ),
   );
 }
 
 class _SearchSettingsSheet extends StatelessWidget {
-  const _SearchSettingsSheet();
+  const _SearchSettingsSheet({this.chatModelProviderKey, this.chatModelId});
+
+  final String? chatModelProviderKey;
+  final String? chatModelId;
 
   String _nameOf(BuildContext context, SearchServiceOptions s) {
     final svc = SearchService.getService(s);
@@ -74,30 +89,10 @@ class _SearchSettingsSheet extends StatelessWidget {
     required bool enabled,
   }) async {
     final overrides = Map<String, dynamic>.from(providerCfg.modelOverrides);
-    final rawMo = overrides[modelId];
-    final baseMo = rawMo is Map ? rawMo : null;
-    final mo = Map<String, dynamic>.from(
-      baseMo?.map((k, val) => MapEntry(k.toString(), val)) ??
-          const <String, dynamic>{},
+    overrides[modelId] = BuiltInToolsHelper.withClaudeDynamicWebSearch(
+      overrides[modelId],
+      enabled,
     );
-    final rawWs = mo['webSearch'];
-    final ws = Map<String, dynamic>.from(
-      rawWs is Map
-          ? rawWs.map((k, val) => MapEntry(k.toString(), val))
-          : const <String, dynamic>{},
-    );
-    if (enabled) {
-      ws['toolVersion'] = 'web_search_20260209';
-    } else {
-      ws.remove('toolVersion');
-      ws.remove('tool_version');
-    }
-    if (ws.isEmpty) {
-      mo.remove('webSearch');
-    } else {
-      mo['webSearch'] = ws;
-    }
-    overrides[modelId] = mo;
     await settings.setProviderConfig(
       providerKey,
       providerCfg.copyWith(modelOverrides: overrides),
@@ -121,8 +116,11 @@ class _SearchSettingsSheet extends StatelessWidget {
     final enabled = ap.currentSearchEnabled;
 
     // Determine if current selected model supports built-in search
-    final providerKey = a?.chatModelProvider ?? settings.currentModelProvider;
-    final modelId = a?.chatModelId ?? settings.currentModelId;
+    final providerKey =
+        chatModelProviderKey ??
+        a?.chatModelProvider ??
+        settings.currentModelProvider;
+    final modelId = chatModelId ?? a?.chatModelId ?? settings.currentModelId;
     final cfg = (providerKey != null)
         ? settings.getProviderConfig(providerKey)
         : null;
@@ -147,7 +145,21 @@ class _SearchSettingsSheet extends StatelessWidget {
           cfg: cfg,
           modelId: modelId,
         );
-    final builtInMode = hasBuiltInSearch;
+    Future<void> setExternalSearchEnabled(bool value) async {
+      if (value &&
+          cfg != null &&
+          providerKey != null &&
+          (modelId ?? '').isNotEmpty) {
+        await _setBuiltInSearchEnabled(
+          settings: settingsNotifier,
+          providerCfg: cfg,
+          providerKey: providerKey,
+          modelId: modelId!,
+          enabled: false,
+        );
+      }
+      await assistantNotifier.setSearchEnabledForCurrentAssistant(value);
+    }
 
     final maxHeight = MediaQuery.of(context).size.height * 0.8;
     return SafeArea(
@@ -195,7 +207,7 @@ class _SearchSettingsSheet extends StatelessWidget {
                       final mid = modelId!;
                       return IosCardPress(
                         borderRadius: BorderRadius.circular(14),
-                        baseColor: cs.surface,
+                        baseColor: sheetTileColor(context),
                         duration: const Duration(milliseconds: 260),
                         onTap: () async {
                           Haptics.light();
@@ -263,7 +275,9 @@ class _SearchSettingsSheet extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 14),
-                  if (supportsClaudeDynamicWebSearch)
+                  // Only meaningful under built-in search: the tool version is
+                  // picked when that tool is added, so on its own it is inert.
+                  if (supportsClaudeDynamicWebSearch && hasBuiltInSearch)
                     Builder(
                       builder: (context) {
                         final providerCfg = cfg;
@@ -272,7 +286,7 @@ class _SearchSettingsSheet extends StatelessWidget {
                           padding: const EdgeInsets.only(bottom: 14),
                           child: IosCardPress(
                             borderRadius: BorderRadius.circular(14),
-                            baseColor: cs.surface,
+                            baseColor: sheetTileColor(context),
                             duration: const Duration(milliseconds: 260),
                             onTap: () async {
                               Haptics.light();
@@ -346,69 +360,64 @@ class _SearchSettingsSheet extends StatelessWidget {
                     ),
                 ],
 
-                // Toggle card
-                if (!builtInMode) ...[
-                  IosCardPress(
-                    borderRadius: BorderRadius.circular(14),
-                    baseColor: cs.surface,
-                    duration: const Duration(milliseconds: 260),
-                    onTap: () {
-                      Haptics.light();
-                      context
-                          .read<AssistantProvider>()
-                          .setSearchEnabledForCurrentAssistant(!enabled);
-                    },
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Lucide.Globe, size: 20, color: cs.primary),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                l10n.searchSettingsSheetWebSearchTitle,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: AppFontWeights.emphasis,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          tooltip:
-                              l10n.searchSettingsSheetOpenSearchServicesTooltip,
-                          icon: Icon(Lucide.Settings, size: 20),
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const SearchServicesPage(),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 4),
-                        IosSwitch(
-                          value: enabled,
-                          onChanged: (v) => context
-                              .read<AssistantProvider>()
-                              .setSearchEnabledForCurrentAssistant(v),
-                        ),
-                      ],
-                    ),
+                // External search remains available while built-in search is
+                // active so users can switch modes in one step.
+                IosCardPress(
+                  borderRadius: BorderRadius.circular(14),
+                  baseColor: sheetTileColor(context),
+                  duration: const Duration(milliseconds: 260),
+                  onTap: () async {
+                    Haptics.light();
+                    await setExternalSearchEnabled(!enabled);
+                  },
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-                  const SizedBox(height: 14),
-                ],
+                  child: Row(
+                    children: [
+                      Icon(Lucide.Globe, size: 20, color: cs.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              l10n.searchSettingsSheetWebSearchTitle,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: AppFontWeights.emphasis,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip:
+                            l10n.searchSettingsSheetOpenSearchServicesTooltip,
+                        icon: Icon(Lucide.Settings, size: 20),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const SearchServicesPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      IosSwitch(
+                        value: enabled,
+                        onChanged: setExternalSearchEnabled,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
                 // Services list (iOS-style rows like learning mode)
-                if (!builtInMode && services.isNotEmpty) ...[
+                if (services.isNotEmpty) ...[
                   ...List.generate(services.length, (i) {
                     final s = services[i];
                     final bool isSelected = i == selected;
@@ -421,13 +430,13 @@ class _SearchSettingsSheet extends StatelessWidget {
                         height: 48,
                         child: IosCardPress(
                           borderRadius: BorderRadius.circular(14),
-                          baseColor: cs.surface,
+                          baseColor: sheetTileColor(context),
                           duration: const Duration(milliseconds: 260),
-                          onTap: () {
+                          onTap: () async {
                             Haptics.light();
-                            context
-                                .read<SettingsProvider>()
-                                .setSearchServiceSelected(i);
+                            await settingsNotifier.setSearchServiceSelected(i);
+                            await setExternalSearchEnabled(true);
+                            if (!context.mounted) return;
                             Navigator.of(context).maybePop();
                           },
                           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -459,7 +468,7 @@ class _SearchSettingsSheet extends StatelessWidget {
                     );
                   }),
                   const SizedBox(height: 8),
-                ] else if (!builtInMode) ...[
+                ] else ...[
                   Text(
                     l10n.searchSettingsSheetNoServicesMessage,
                     style: TextStyle(
@@ -502,11 +511,16 @@ class _BrandBadge extends StatelessWidget {
     if (s is PerplexityOptions) return 'perplexity';
     if (s is BochaOptions) return 'bocha';
     if (s is DoubaoOptions) return 'doubao';
+    if (s is KagiOptions) return 'kagi';
     if (s is SerperOptions) return 'serper';
     if (s is GrokOptions) return 'grok';
     if (s is StepFunOptions) return 'stepfun';
     if (s is FirecrawlOptions) return 'firecrawl';
     if (s is TinyFishOptions) return 'tinyfish';
+    if (s is AnySearchOptions) return 'anysearch';
+    if (s is ParallelOptions) return 'parallel';
+    if (s is KimiOptions) return 'kimi';
+    if (s is YouSearchOptions) return 'you';
     if (s is CanaryOptions) return 'canary';
     return 'search';
   }

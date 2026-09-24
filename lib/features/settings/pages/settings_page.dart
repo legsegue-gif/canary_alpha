@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+import '../../scheduled_tasks/pages/scheduled_tasks_page.dart';
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
 import 'package:provider/provider.dart';
@@ -6,18 +9,26 @@ import '../../../core/providers/settings_provider.dart';
 import '../../model/pages/default_model_page.dart';
 import '../../provider/pages/providers_page.dart';
 import 'display_settings_page.dart';
+import 'settings_search_page.dart';
+import '../widgets/settings_search_entry.dart';
 import '../../mcp/pages/mcp_page.dart';
+import '../../workspace/pages/skills_page.dart';
+import '../../workspace/pages/workspace_settings_page.dart';
 import '../../assistant/pages/assistant_settings_page.dart';
 import 'about_page.dart';
 import 'memory_settings_page.dart';
 import 'tts_services_page.dart';
+import 'tool_schema_settings_page.dart';
 import 'log_viewer_page.dart';
 import '../../search/pages/search_services_page.dart';
 import '../../backup/pages/backup_page.dart';
 import '../../quick_phrase/pages/quick_phrases_page.dart';
 import '../../instruction_injection/pages/instruction_injection_page.dart';
 import '../../world_book/pages/world_book_page.dart';
+import '../../../shared/widgets/section_card.dart';
 import 'network_proxy_page.dart';
+import 'phone_control_settings_page.dart';
+import '../../home/services/local_tools_service.dart';
 import 'storage_space_page.dart';
 import '../../stats/pages/stats_page.dart';
 import '../../../core/services/storage/storage_usage_service.dart';
@@ -36,6 +47,7 @@ class SettingsPage extends StatelessWidget {
     final settings = context.watch<SettingsProvider>();
 
     String modeLabel(ThemeMode m) {
+      final l10n = AppLocalizations.of(context)!;
       switch (m) {
         case ThemeMode.dark:
           return l10n.settingsPageDarkMode;
@@ -50,7 +62,7 @@ class SettingsPage extends StatelessWidget {
       final settingsProvider = context.read<SettingsProvider>();
       final selected = await showModalBottomSheet<ThemeMode>(
         context: context,
-        backgroundColor: cs.surface,
+        backgroundColor: context.overlaySurface,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
@@ -118,8 +130,12 @@ class SettingsPage extends StatelessWidget {
         ),
         title: Text(l10n.settingsPageTitle),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      body: SettingsSearchList(
+        onSearch: (origin) => showMobileSettingsSearch(
+          context,
+          origin: origin,
+          onColorMode: pickThemeMode,
+        ),
         children: [
           if (!settings.hasAnyActiveModel)
             Material(
@@ -151,8 +167,17 @@ class SettingsPage extends StatelessWidget {
 
           // 通用设置：使用iOS风格分组卡片，黑色（中性）图标与标题，无描述
           header(l10n.settingsPageGeneralSection, first: true),
-          _iosSectionCard(
+          SectionCard(
             children: [
+              if (DeviceLocalTools.phoneControlSupported) ...[
+                _iosNavRow(
+                  context,
+                  icon: Lucide.Smartphone,
+                  label: l10n.phoneControlTitle,
+                  onTap: () => PhoneControlSettingsPage.open(context),
+                ),
+                _iosDivider(context),
+              ],
               _iosNavRow(
                 context,
                 icon: Lucide.SunMoon,
@@ -191,7 +216,7 @@ class SettingsPage extends StatelessWidget {
 
           const SizedBox(height: 12),
           header(l10n.settingsPageModelsServicesSection),
-          _iosSectionCard(
+          SectionCard(
             children: [
               _iosNavRow(
                 context,
@@ -247,6 +272,44 @@ class SettingsPage extends StatelessWidget {
                   Navigator.of(
                     context,
                   ).push(MaterialPageRoute(builder: (_) => const McpPage()));
+                },
+              ),
+              _iosDivider(context),
+              _iosNavRow(
+                context,
+                icon: Lucide.FolderCode,
+                label: l10n.settingsPageWorkspace,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const WorkspaceSettingsPage(),
+                    ),
+                  );
+                },
+              ),
+              _iosDivider(context),
+              if (defaultTargetPlatform == TargetPlatform.android ||
+                  defaultTargetPlatform == TargetPlatform.iOS) ...[
+                _iosNavRow(
+                  context,
+                  icon: LucideIcons.clock,
+                  label: l10n.scheduledTasksTitle,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ScheduledTasksPage(),
+                    ),
+                  ),
+                ),
+                _iosDivider(context),
+              ],
+              _iosNavRow(
+                context,
+                icon: Lucide.WandSparkles,
+                label: l10n.settingsPageSkills,
+                onTap: () {
+                  Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const SkillsPage()));
                 },
               ),
               _iosDivider(context),
@@ -313,7 +376,7 @@ class SettingsPage extends StatelessWidget {
 
           const SizedBox(height: 12),
           header(l10n.settingsPageDataSection),
-          _iosSectionCard(
+          SectionCard(
             children: [
               _iosNavRow(
                 context,
@@ -342,7 +405,7 @@ class SettingsPage extends StatelessWidget {
 
           const SizedBox(height: 12),
           header(l10n.settingsPageAboutSection),
-          _iosSectionCard(
+          SectionCard(
             children: [
               _iosNavRow(
                 context,
@@ -394,6 +457,19 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
               ],
+              _iosDivider(context),
+              _iosNavRow(
+                context,
+                icon: Lucide.Wrench,
+                label: l10n.toolSchemaSettingsPageTitle,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const ToolSchemaSettingsPage(),
+                    ),
+                  );
+                },
+              ),
               // _iosDivider(context),
               // _iosNavRow(
               //   context,
@@ -431,33 +507,6 @@ class SettingsPage extends StatelessWidget {
 }
 
 // --- iOS-style widgets for Settings page ---
-
-Widget _iosSectionCard({required List<Widget> children}) {
-  return Builder(
-    builder: (context) {
-      final theme = Theme.of(context);
-      final cs = theme.colorScheme;
-      final isDark = theme.brightness == Brightness.dark;
-      // Light: white with slight transparency; Dark: subtle translucent dark
-      final Color bg = context.appColors.surfaceCard;
-      return Container(
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: cs.outlineVariant.withValues(alpha: isDark ? 0.08 : 0.06),
-            width: 0.6,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(children: children),
-        ),
-      );
-    },
-  );
-}
 
 Widget _iosDivider(BuildContext context) {
   final cs = Theme.of(context).colorScheme;
@@ -538,9 +587,7 @@ class _ChatStorageSummaryState extends State<_ChatStorageSummary> {
         if (snapshot.connectionState != ConnectionState.done) {
           return Text(l10n.settingsPageCalculating, style: style);
         }
-        final count = data?.totalFiles ?? 0;
-        final size = _fmtBytes(data?.totalBytes ?? 0);
-        return Text(l10n.settingsPageFilesCount(count, size), style: style);
+        return Text(_fmtBytes(data?.totalBytes ?? 0), style: style);
       },
     );
   }
