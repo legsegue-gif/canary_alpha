@@ -14,7 +14,7 @@ class UpdateRequiredScreen extends StatelessWidget {
   });
 
   static const conversionToolUrl =
-      'https://github.com/legsegue-gif/canary_alphatools';
+      'https://github.com/legsegue-gif/canary_alpha';
 
   final String diagnosticCode;
 

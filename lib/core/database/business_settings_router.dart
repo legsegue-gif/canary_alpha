@@ -21,7 +21,10 @@ final class BusinessKeyRegistry {
     'window_height_v1',
     'window_pos_x_v1',
     'window_pos_y_v1',
+    'window_physical_pos_x_v1',
+    'window_physical_pos_y_v1',
     'window_maximized_v1',
+    'linux_hide_title_bar_v1',
     'desktop_hotkeys_commands_v1',
     'desktop_hotkeys_enabled_v1',
     'display_chat_font_scale_v1',
@@ -38,6 +41,8 @@ final class BusinessKeyRegistry {
   };
 
   static const preferenceKeys = <String>{
+    'desktop_scheduled_tasks_v1',
+    'scheduled_task_results_v1',
     'current_assistant_id_v1',
     'selected_model_v1',
     'per_chat_model_enabled_v1',
@@ -170,6 +175,10 @@ final class BusinessKeyRegistry {
     'chat_bubble_style_overrides_v1',
     'chat_bubble_style_overrides_user_v1',
     'tool_schema_overrides_v1',
+    'environment_state_v1',
+    'environment_mirrors_v1',
+    'environment_variables_v1',
+    'environment_privacy_mode_v1',
   };
 
   static BusinessKeyDisposition classify(String key) {
@@ -501,6 +510,9 @@ final class BusinessSettingsRouter {
             'allowPastConversationRecall',
             'generateConversationSummary',
             'appendCurrentTimeToUserMessage',
+            'useIso8601TimeFormat',
+            'allowConversationSystemPrompt',
+            'allowConversationPromptInjection',
           },
           numbers: const {
             'temperature',
@@ -533,6 +545,8 @@ final class BusinessSettingsRouter {
             'id',
             'name',
             'apiKey',
+            'oauthProvider',
+            'oauthModelsSyncedAt',
             'baseUrl',
             'chatPath',
             'location',
@@ -560,7 +574,7 @@ final class BusinessSettingsRouter {
             'claudePromptCachingEnabled',
           },
           lists: const {'models', 'apiKeys', 'customHeaders', 'customBody'},
-          maps: const {'modelOverrides', 'keyManagement'},
+          maps: const {'modelOverrides', 'keyManagement', 'oauthCredentials'},
         );
         _validateProviderChildren(kind, payload);
         return;
@@ -677,6 +691,22 @@ final class BusinessSettingsRouter {
           throw FormatException(kind.sourceKey);
         }
         return;
+      case BusinessEntityKind.workspace:
+        _validateKnownFields(
+          kind,
+          payload,
+          requiredStrings: const {'id', 'name'},
+        );
+        return;
+      case BusinessEntityKind.skill:
+        _validateKnownFields(
+          kind,
+          payload,
+          requiredStrings: const {'id', 'source', 'installedAt', 'updatedAt'},
+          booleans: const {'enabled'},
+          numbers: const {'useCount'},
+        );
+        return;
       case BusinessEntityKind.userProfileField:
         _validateKnownFields(
           kind,
@@ -779,6 +809,37 @@ final class BusinessSettingsRouter {
     BusinessEntityKind kind,
     Map<String, Object?> payload,
   ) {
+    final oauthProvider = payload['oauthProvider'];
+    if (oauthProvider != null &&
+        !{'chatgpt', 'grok', 'kimi', 'claude'}.contains(oauthProvider)) {
+      throw const FormatException('Invalid OAuth provider');
+    }
+    final credentials = payload['oauthCredentials'];
+    if (credentials is Map) {
+      _validateKnownFields(
+        kind,
+        _stringKeyedMap(credentials),
+        requiredStrings: const {
+          'accessToken',
+          'refreshToken',
+          'expiresAt',
+          'sessionId',
+        },
+        strings: const {
+          'email',
+          'accountId',
+          'plan',
+          'deviceId',
+          'organizationId',
+          'organizationName',
+        },
+        booleans: const {'requiresLogin'},
+      );
+      if (oauthProvider == null ||
+          DateTime.tryParse(credentials['expiresAt'] as String) == null) {
+        throw const FormatException('Invalid OAuth credentials');
+      }
+    }
     for (final child in _mappedObjects(payload['apiKeys'])) {
       _validateKnownFields(
         kind,
@@ -900,7 +961,14 @@ final class BusinessSettingsRouter {
           'caseSensitive',
           'constantActive',
         },
-        integers: const {'priority', 'injectDepth', 'scanDepth'},
+        integers: const {
+          'priority',
+          'injectDepth',
+          'scanDepth',
+          'sticky',
+          'cooldown',
+          'delay',
+        },
         lists: const {'keywords'},
       );
     }
@@ -936,6 +1004,7 @@ final class BusinessSettingsRouter {
       case 'ollama':
       case 'jina':
       case 'doubao':
+      case 'kagi':
         _validateKnownFields(
           kind,
           payload,
@@ -1017,6 +1086,7 @@ final class BusinessSettingsRouter {
           stringLists: const {'apiKeys'},
         );
       case 'parallel':
+      case 'kimi':
         _validateKnownFields(
           kind,
           payload,

@@ -1,3 +1,4 @@
+import '../auth/provider_oauth_service.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:dio/dio.dart';
@@ -25,7 +26,9 @@ import 'providers/openai_images.dart';
 import 'providers/openai_responses.dart';
 import 'providers/zhipu_layout_parsing.dart';
 import 'retry_policy.dart';
+import 'tool_call_cancellation.dart';
 import 'stream/retrying_stream.dart';
+import 'stream/stream_chunk_emit.dart';
 
 export 'chat_api_helpers.dart' show ToolCallHandler;
 export 'generation/text_generation_result.dart';
@@ -119,6 +122,37 @@ class ChatApiService {
     return effectiveModelInfo(config, modelId).input.contains(Modality.image);
   }
 
+  /// Apply request restrictions after resolving credentials. OAuth resolution
+  /// reloads the stored provider, so a caller's filtered copy is not sufficient.
+  static ProviderConfig _textOnlyConfig(ProviderConfig config, String modelId) {
+    final raw = config.modelOverrides[modelId];
+    final override = raw is Map ? raw : const <String, dynamic>{};
+    return config.copyWith(
+      customBody: const [],
+      modelOverrides: {
+        modelId: {
+          for (final key in [
+            'apiModelId',
+            'api_model_id',
+            'headers',
+            'abilities',
+            'reasoningEffort',
+            'thinkingBudget',
+            'oauthProtocol',
+            'oauthThinkingMode',
+            'oauthThinkingRequired',
+            'oauthThinkingEfforts',
+            'oauthThinkingDefaultEffort',
+          ])
+            if (override.containsKey(key)) key: override[key],
+          'builtInTools': <String>[],
+          'input': ['text'],
+          'output': ['text'],
+        },
+      },
+    );
+  }
+
   static http.Client _clientFor(ProviderConfig cfg, CancelToken cancelToken) {
     final enabled = cfg.proxyEnabled == true;
     final host = (cfg.proxyHost ?? '').trim();
@@ -163,19 +197,15 @@ class ChatApiService {
     bool builtInSearchOnly = false,
     bool skipImageParsing = false,
     bool parseMarkdownImageLinks = true,
+    // Disallow media, tools and body overrides for detached text generation.
+    bool textOnly = false,
     AutoRetryOptions? retryOverride,
   }) async* {
-    final options = retryOverride ?? AutoRetryConfig.current;
-    final sessionHeaders = providerSessionHeaders(
-      config,
-      conversationId: conversationId,
-      extraHeaders: extraHeaders,
-    );
-    final kind = ProviderConfig.classify(
-      config.id,
-      explicitType: config.providerType,
-    );
     final sessionToken = CancelToken();
+    final toolCancellation = ToolCallCancellation(
+      isCancelled: () => sessionToken.isCancelled,
+      cancelled: _whenCancelled(sessionToken),
+    );
     final rid = (requestId ?? '').trim();
     if (rid.isNotEmpty) {
       final prev = _activeCancelTokens.remove(rid);
@@ -184,57 +214,89 @@ class ChatApiService {
       } catch (_) {}
       _activeCancelTokens[rid] = sessionToken;
     }
-    final useOpenAIImagesApi =
-        kind == ProviderKind.openai &&
-        allowImagesApiRouting &&
-        shouldUseOpenAIImagesApi(config, modelId);
-    final useZhipuLayoutParsing = shouldUseZhipuLayoutParsing(config, modelId);
-    final unicodeSafeMessages = _sanitizeMessages(messages);
-    final stripUnsupportedImageInputs =
-        !skipImageParsing &&
-        !ocrActive &&
-        !useOpenAIImagesApi &&
-        !useZhipuLayoutParsing &&
-        !_supportsImageInput(config, modelId);
-    final safeMessages = stripUnsupportedImageInputs
-        ? await _stripImageInputsFromMessages(unicodeSafeMessages)
-        : unicodeSafeMessages;
-    final safeUserImagePaths = stripUnsupportedImageInputs
-        ? const <String>[]
-        : userImagePaths;
-
-    final imageOutput = effectiveModelInfo(
-      config,
-      modelId,
-    ).output.contains(Modality.image);
-    final retryNetworkErrors =
-        !useOpenAIImagesApi && !useZhipuLayoutParsing && !imageOutput;
-    final emitRetryUi = options.enabled && options.maxRetries > 0;
-    Stream<StreamChunk> retryRound(Stream<StreamChunk> Function() sendRound) {
-      return retryingStream<StreamChunk>(
-        options: options,
-        isCancelled: () => sessionToken.isCancelled,
-        cancelled: _whenCancelled(sessionToken),
-        shouldRetry: (error) => shouldRetryError(
-          error,
-          options,
-          retryOnNetworkError: retryNetworkErrors ? null : false,
-        ),
-        retryEvent: emitRetryUi
-            ? (attempt, delay, error) => RetryPending(
-                attempt: attempt + 1,
-                maxRetries: options.maxRetries,
-                delay: delay,
-                errorText: error.toString(),
-                retryAt: DateTime.now().add(delay),
-              )
-            : null,
-        attemptStartEvent: emitRetryUi ? () => const RetryAttemptStart() : null,
-        attempt: (_) => sendRound(),
-      );
-    }
-
     try {
+      config = await Future.any<ProviderConfig>([
+        ProviderOAuthService.instance.resolve(config),
+        _whenCancelled(sessionToken).then(
+          (_) => throw const ProviderOAuthException(
+            ProviderOAuthFailure.cancelled,
+          ),
+        ),
+      ]);
+      if (sessionToken.isCancelled) return;
+      if (textOnly) config = _textOnlyConfig(config, modelId);
+      if (config.oauthProvider == OAuthProvider.chatgpt) stream = true;
+      if (config.oauthProvider == OAuthProvider.kimi &&
+          (config.modelOverrides[modelId] as Map?)?['oauthProtocol'] ==
+              'anthropic') {
+        config = config.copyWith(providerType: ProviderKind.claude);
+      }
+      final options = retryOverride ?? AutoRetryConfig.current;
+      final sessionHeaders = providerSessionHeaders(
+        config,
+        conversationId: conversationId,
+        extraHeaders: extraHeaders,
+      );
+      final kind = ProviderConfig.classify(
+        config.id,
+        explicitType: config.providerType,
+      );
+      final useOpenAIImagesApi =
+          !textOnly &&
+          kind == ProviderKind.openai &&
+          allowImagesApiRouting &&
+          shouldUseOpenAIImagesApi(config, modelId);
+      final useZhipuLayoutParsing =
+          !textOnly && shouldUseZhipuLayoutParsing(config, modelId);
+      final unicodeSafeMessages = _sanitizeMessages(messages);
+      final stripUnsupportedImageInputs =
+          textOnly ||
+          !skipImageParsing &&
+              !ocrActive &&
+              !useOpenAIImagesApi &&
+              !useZhipuLayoutParsing &&
+              !_supportsImageInput(config, modelId);
+      final safeMessages = stripUnsupportedImageInputs
+          ? await _stripImageInputsFromMessages(unicodeSafeMessages)
+          : unicodeSafeMessages;
+      final safeUserImagePaths = stripUnsupportedImageInputs
+          ? const <String>[]
+          : userImagePaths;
+      final toolHandler = textOnly ? null : onToolCall;
+
+      final imageOutput = effectiveModelInfo(
+        config,
+        modelId,
+      ).output.contains(Modality.image);
+      final retryNetworkErrors =
+          !useOpenAIImagesApi && !useZhipuLayoutParsing && !imageOutput;
+      final emitRetryUi = options.enabled && options.maxRetries > 0;
+      Stream<StreamChunk> retryRound(Stream<StreamChunk> Function() sendRound) {
+        return retryingStream<StreamChunk>(
+          options: options,
+          isCancelled: () => sessionToken.isCancelled,
+          cancelled: _whenCancelled(sessionToken),
+          shouldRetry: (error) => shouldRetryError(
+            error,
+            options,
+            retryOnNetworkError: retryNetworkErrors ? null : false,
+          ),
+          retryEvent: emitRetryUi
+              ? (attempt, delay, error) => RetryPending(
+                  attempt: attempt + 1,
+                  maxRetries: options.maxRetries,
+                  delay: delay,
+                  errorText: error.toString(),
+                  retryAt: DateTime.now().add(delay),
+                )
+              : null,
+          attemptStartEvent: emitRetryUi
+              ? () => const RetryAttemptStart()
+              : null,
+          attempt: (_) => carrySplitSurrogates(sendRound()),
+        );
+      }
+
       yield* retryRound(
         () => _sendOnce(
           config: config,
@@ -245,13 +307,18 @@ class ChatApiService {
           temperature: temperature,
           topP: topP,
           maxTokens: maxTokens,
-          tools: tools,
-          onToolCall: onToolCall,
+          tools: textOnly ? null : tools,
+          onToolCall: toolHandler == null
+              ? null
+              : (name, args, {toolCallId}) => toolCancellation.run(
+                  () => toolHandler(name, args, toolCallId: toolCallId),
+                ),
           extraHeaders: sessionHeaders,
-          extraBody: extraBody,
+          extraBody: textOnly ? null : extraBody,
           stream: stream,
           builtInSearchOnly: builtInSearchOnly,
-          skipImageParsing: skipImageParsing || !parseMarkdownImageLinks,
+          skipImageParsing:
+              textOnly || skipImageParsing || !parseMarkdownImageLinks,
           kind: kind,
           useOpenAIImagesApi: useOpenAIImagesApi,
           useZhipuLayoutParsing: useZhipuLayoutParsing,
@@ -329,7 +396,10 @@ class ChatApiService {
     }
     final cancelToken = CancelToken();
     _bridgeCancel(sessionToken, cancelToken);
-    final client = _clientFor(config, cancelToken);
+    final client = ProviderOAuthService.instance.authenticatedClient(
+      _clientFor(config, cancelToken),
+      config,
+    );
     try {
       if (useZhipuLayoutParsing) {
         yield* sendZhipuLayoutParsingStream(
@@ -501,6 +571,7 @@ class ChatApiService {
     bool builtInSearchOnly = false,
     bool skipImageParsing = false,
     bool parseMarkdownImageLinks = true,
+    bool textOnly = false,
     AutoRetryOptions? retryOverride,
     void Function(RetryPending? pending)? onRetry,
   }) async {
@@ -528,6 +599,7 @@ class ChatApiService {
       builtInSearchOnly: builtInSearchOnly,
       skipImageParsing: skipImageParsing,
       parseMarkdownImageLinks: parseMarkdownImageLinks,
+      textOnly: textOnly,
       retryOverride: retryOverride,
     )) {
       if (chunk is RetryAttemptStart) {
