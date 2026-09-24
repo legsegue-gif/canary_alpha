@@ -2,7 +2,7 @@ Canary Android workspace sandbox — third-party native code
 ==========================================================
 
 This directory packages prebuilt Termux binaries (fetched by
-`tool/fetch_proot.sh`, gitignored) and JNI derived from Termux.
+`tool/fetch_proot.sh` and committed to the repository) and JNI derived from Termux.
 
 PRoot (libproot_exec.so, libproot_loader.so)
 --------------------------------------------
@@ -13,20 +13,20 @@ Canary executes these binaries as a separate process (not linked into the
 AGPL-3 application). Corresponding source is the Termux proot tree at the
 version below.
 
-Termux package: proot 5.1.107.92
+Termux package: proot 5.1.107.94
 Pool: https://packages.termux.dev/apt/termux-main/pool/main/p/proot/
 
-  proot_5.1.107.92_arm.deb      →  jniLibs/armeabi-v7a/
-  proot_5.1.107.92_aarch64.deb  →  jniLibs/arm64-v8a/
-  proot_5.1.107.92_x86_64.deb   →  jniLibs/x86_64/
+  proot_5.1.107.94_arm.deb      →  jniLibs/armeabi-v7a/
+  proot_5.1.107.94_aarch64.deb  →  jniLibs/arm64-v8a/
+  proot_5.1.107.94_x86_64.deb   →  jniLibs/x86_64/
 
 SHA-256 of deployed files (also in tool/proot_checksums.txt):
 
-  efb41b19b15aaa13b4498cde3ca051fed8e2c39ae5d8d21f308c07934a0eb215  armeabi-v7a/libproot_exec.so
+  9c9c42c7734c7a66dcb0bee62bcfb5e1f4591151a9ac9582771933824bf0c64a  armeabi-v7a/libproot_exec.so
   c64fcdc4e487ac6ec39955faf0049235258cbe284a6255797945817dd7c36198  armeabi-v7a/libproot_loader.so
-  ea47e17da8e6ff4882c169c6508861e5b4be9227e477c6020f4f14facc85c10d  arm64-v8a/libproot_exec.so
+  b1032b2bf455779a0cba67415baf59f6ef8e9140f67278671578b9e74137bca4  arm64-v8a/libproot_exec.so
   44ef39c1e1a18c09f6e4c4b5d6f8bba82d30596598bd155ec162d05c5122ff04  arm64-v8a/libproot_loader.so
-  5c6b99c48ebb87580551afd654e49eb8d178fd45fef0b65397c99a1d901c417b  x86_64/libproot_exec.so
+  61102028c5baebe82cb210579313487ec051d75c18d7ceec96ec262b59dda1ae  x86_64/libproot_exec.so
   914564ea1c66f50b38f18cac857fcf814c6b1ab027789178880fca1d530599b3  x86_64/libproot_loader.so
 
 libtalloc (libtalloc.so)
@@ -47,7 +47,7 @@ libandroid-shmem (libandroid-shmem.so)
 Termux libandroid-shmem <https://github.com/termux/libandroid-shmem>
 License: BSD-3-Clause
 Termux package: libandroid-shmem 0.7
-Required by Termux proot 5.1.107.92 (DT_NEEDED libandroid-shmem.so).
+Required by Termux proot 5.1.107.94 (DT_NEEDED libandroid-shmem.so).
 The older OpenMinis pin (proot 5.1.107-70) is no longer on the Termux pool.
 
   ef35602fa6c8bca9081af1594fabeacbd98b6e8921dd6be54484291933b8040f  armeabi-v7a/libandroid-shmem.so
