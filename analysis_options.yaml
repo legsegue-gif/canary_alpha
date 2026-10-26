@@ -33,6 +33,7 @@ analyzer:
     - dependencies/flutter_math_fork/**
     - dependencies/flutter_tts/**
     - build/**
+    - "**/*.g.dart"
     - android/**
     - ios/**
     - web/**
