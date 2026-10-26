@@ -62,7 +62,7 @@ for ((attempt = 1; attempt <= 30; attempt++)); do
     echo "Canary exited before the AppImage startup check completed" >&2
     exit 1
   fi
-  if ((attempt >= 10)) && xdotool search --onlyvisible --class '[Kk]elivo' >/dev/null; then
+  if ((attempt >= 10)) && xdotool search --onlyvisible --class '[Cc]anary' >/dev/null; then
     echo "AppImage startup and GStreamer checks passed"
     exit 0
   fi
