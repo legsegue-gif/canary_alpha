@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,6 +90,103 @@ void main() {
   });
 
   test(
+    'replaces retired CanaryIN settings and persists the new provider',
+    () async {
+      final retired = ProviderConfig.defaultsFor('CanaryIN').copyWith(
+        baseUrl: 'https://text.pollinations.ai/openai',
+        apiKey: 'canary',
+        models: ['mistral', 'qwen-coder'],
+        modelOverrides: {
+          'mistral': {
+            'abilities': ['tool'],
+          },
+          'qwen-coder': {
+            'abilities': ['tool'],
+          },
+        },
+      );
+      final other = ProviderConfig.defaultsFor(
+        'OpenAI',
+      ).copyWith(apiKey: 'user-key', models: ['gpt-4o']);
+      await repository.replaceSnapshot(
+        BusinessSettingsRouter.normalizeAndRoute({
+          'provider_configs_v1': jsonEncode({
+            'CanaryIN': retired.toJson(),
+            'OpenAI': other.toJson(),
+          }),
+          'selected_model_v1': 'CanaryIN::mistral',
+          'title_model_v1': 'CanaryIN::qwen-coder',
+          'summary_model_v1': 'OpenAI::gpt-4o',
+          'pinned_models_v1': ['CanaryIN::mistral', 'OpenAI::gpt-4o'],
+          'reasoning_choice_by_model_v1': jsonEncode({
+            'CanaryIN::mistral': {'level': 'high'},
+            'OpenAI::gpt-4o': {'level': 'off'},
+          }),
+        }),
+      );
+
+      final settings = SettingsProvider(BusinessPreferences(repository));
+      await settings.loaded;
+      final expected = ProviderConfig.defaultsFor('CanaryIN');
+      expect(
+        settings.getProviderConfig('CanaryIN').toJson(),
+        expected.toJson(),
+      );
+      expect(settings.getProviderConfig('OpenAI').toJson(), other.toJson());
+      expect(settings.currentModelKey, isNull);
+      expect(settings.titleModelProvider, isNull);
+      expect(settings.summaryModelProvider, 'OpenAI');
+      expect(settings.pinnedModels, {'OpenAI::gpt-4o'});
+      expect(settings.reasoningChoiceFor('CanaryIN', 'mistral'), isNull);
+      expect(settings.reasoningChoiceFor('OpenAI', 'gpt-4o'), isNotNull);
+
+      final saved = BusinessPreferences(repository);
+      await saved.load();
+      final configs =
+          jsonDecode(saved.getString('provider_configs_v1')!) as Map;
+      expect(configs['CanaryIN'], expected.toJson());
+      expect(saved.getString('selected_model_v1'), isNull);
+      expect(saved.getString('title_model_v1'), isNull);
+
+      final reloaded = SettingsProvider(BusinessPreferences(repository));
+      await reloaded.loaded;
+      expect(
+        reloaded.getProviderConfig('CanaryIN').toJson(),
+        expected.toJson(),
+      );
+    },
+  );
+
+  test(
+    'keeps current CanaryIN customizations and other custom endpoints',
+    () async {
+      for (final baseUrl in [
+        'https://api.canaryas.top/v1',
+        'https://custom.test/v1',
+      ]) {
+        final customized = ProviderConfig.defaultsFor(
+          'CanaryIN',
+        ).copyWith(baseUrl: baseUrl, models: ['auto'], enabled: false);
+        await repository.replaceSnapshot(
+          BusinessSettingsRouter.normalizeAndRoute({
+            'provider_configs_v1': jsonEncode({
+              'CanaryIN': customized.toJson(),
+            }),
+            'selected_model_v1': 'CanaryIN::auto',
+          }),
+        );
+        final settings = SettingsProvider(BusinessPreferences(repository));
+        await settings.loaded;
+        expect(
+          settings.getProviderConfig('CanaryIN').toJson(),
+          customized.toJson(),
+        );
+        expect(settings.currentModelKey, 'CanaryIN::auto');
+      }
+    },
+  );
+
+  test(
     'migrated order-only provider state survives startup seeding and reload',
     () async {
       const legacyOrder = <String>[
@@ -105,7 +204,12 @@ void main() {
         'Grok',
         'ByteDance',
       ];
-      const migratedOrder = <String>[...legacyOrder, '随想AI中转站', 'MaruCode'];
+      const migratedOrder = <String>[
+        ...legacyOrder,
+        'Vercel',
+        '随想AI中转站',
+        'MaruCode',
+      ];
       await repository.replaceSnapshot(
         BusinessSettingsRouter.normalizeAndRoute({
           'providers_order_v1': legacyOrder,
@@ -115,6 +219,15 @@ void main() {
       final settings = SettingsProvider(BusinessPreferences(repository));
       await settings.loaded;
       expect(settings.providersOrder, migratedOrder);
+
+      final vercel = settings.getProviderConfig('Vercel');
+      expect(vercel.name, 'Vercel AI Gateway');
+      expect(vercel.enabled, isFalse);
+      expect(vercel.providerType, ProviderKind.openai);
+      expect(vercel.baseUrl, 'https://ai-gateway.vercel.sh/v1');
+      expect(vercel.balanceEnabled, isFalse);
+      expect(vercel.balanceApiPath, '/credits');
+      expect(vercel.balanceResultPath, 'balance');
 
       final suixiang = settings.getProviderConfig('随想AI中转站');
       expect(suixiang.enabled, isFalse);

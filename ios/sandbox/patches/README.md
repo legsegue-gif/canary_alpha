@@ -1,7 +1,7 @@
 # iSH patches (Canary)
 
 Applied by `build_ish.sh` after the checkout is pinned to `ISH_SHA`
-(`64933c9d6b8890fb9f0fe5a581e78fdad9ea5256`, legsegue-gif/solos-ish).
+(`0ce58f87ef4313ccfb84a61b69bcbbe6d904f748`, legsegue-gif/solos-ish).
 
 The pin follows [`OpenMinis/OpenMinis` main's `deps/ish` submodule](https://github.com/OpenMinis/OpenMinis/tree/main/deps).
 Future upgrades should use the revision adopted there and keep an explicit SHA

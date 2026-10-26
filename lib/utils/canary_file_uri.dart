@@ -19,6 +19,7 @@ final class CanaryFileUri {
     'images',
     'avatars',
     'fonts',
+    'drafts',
   ];
 
   /// Cheap prefix check. Does **not** validate structure.

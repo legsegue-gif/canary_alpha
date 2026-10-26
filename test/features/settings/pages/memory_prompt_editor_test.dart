@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:Canary/core/providers/settings_provider.dart';
 import 'package:Canary/core/services/memory/memory_prompts.dart';
 import 'package:Canary/features/settings/pages/memory_settings_page.dart';
-import 'package:Canary/features/settings/widgets/memory_ui.dart';
+import 'package:Canary/shared/widgets/tip_icon.dart';
 import 'package:Canary/l10n/app_localizations.dart';
 
 import '../../../support/business_test_harness.dart';
@@ -57,7 +57,7 @@ void main() {
 
     expect(find.text('Items injected per type'), findsOneWidget);
     expect(find.textContaining('When a type exceeds this limit'), findsNothing);
-    expect(find.byType(MemoryTipIcon), findsOneWidget);
+    expect(find.byType(TipIcon), findsOneWidget);
   });
 
   testWidgets('editor shows one field, in the language the model is sent', (

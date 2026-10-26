@@ -6,6 +6,7 @@ import 'package:Canary/core/database/business_preferences.dart';
 import 'package:Canary/core/database/business_repository.dart';
 import 'package:Canary/core/database/chat_database_repository.dart';
 import 'package:Canary/core/models/assistant.dart';
+import 'package:Canary/core/models/reasoning_request.dart';
 import 'package:Canary/core/models/chat_message.dart';
 import 'package:Canary/core/providers/assistant_provider.dart';
 import 'package:Canary/core/providers/memory_provider_v2.dart';
@@ -137,7 +138,7 @@ void main() {
             required String modelId,
             required String prompt,
             String? conversationId,
-            int? thinkingBudget,
+            ReasoningRequest reasoning = ReasoningRequest.auto,
           }) async =>
               throw StateError('use processWindow llmCall in these tests'),
     );
