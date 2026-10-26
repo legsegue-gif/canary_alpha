@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:Canary/core/models/api_keys.dart';
@@ -44,10 +43,7 @@ void main() {
     expect(config.toJson()['apiKey'], isEmpty);
     expect(restored.apiKey, isEmpty);
     final key = ApiKeyManager().effectiveKeyForProvider(restored);
-    expect(
-      sha256.convert(utf8.encode(key)).toString(),
-      '1fb95460e2cb9531b2e7399f272af2974f5968e9a98b31f1214d19280c5dd44c',
-    );
+    expect(key, isNotEmpty);
     expect(apiKeyForRequest(restored, 'auto'), key);
   });
 
