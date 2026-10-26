@@ -898,6 +898,18 @@ abstract class AppLocalizations {
   /// **'App Launches'**
   String get statsPageLaunchCount;
 
+  /// No description provided for @statsPageCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost ({currency})'**
+  String statsPageCost(String currency);
+
+  /// No description provided for @statsPageModelsWithoutPricing.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} model without pricing} other{{count} models without pricing}}'**
+  String statsPageModelsWithoutPricing(int count);
+
   /// No description provided for @statsPageUsageTrendTitle.
   ///
   /// In en, this message translates to:
@@ -1474,12 +1486,6 @@ abstract class AppLocalizations {
   /// **'Please select a model first'**
   String get homePagePleaseSelectModel;
 
-  /// No description provided for @homePageAudioAttachmentUnsupported.
-  ///
-  /// In en, this message translates to:
-  /// **'The current model does not support audio attachments. Switch to a model that supports audio input or remove the audio file and try again.'**
-  String get homePageAudioAttachmentUnsupported;
-
   /// No description provided for @homePagePleaseSetupTranslateModel.
   ///
   /// In en, this message translates to:
@@ -1933,8 +1939,20 @@ abstract class AppLocalizations {
   /// No description provided for @assistantEditThinkingBudgetTitle.
   ///
   /// In en, this message translates to:
-  /// **'Thinking Budget'**
+  /// **'Thinking'**
   String get assistantEditThinkingBudgetTitle;
+
+  /// No description provided for @assistantEditReasoningFollowDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow model default'**
+  String get assistantEditReasoningFollowDefault;
+
+  /// No description provided for @assistantEditReasoningClampedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The actual level is clamped to what each model supports'**
+  String get assistantEditReasoningClampedSubtitle;
 
   /// No description provided for @assistantEditConfigureButton.
   ///
@@ -3040,6 +3058,102 @@ abstract class AppLocalizations {
   /// **'Files'**
   String get backupPageFilesLabel;
 
+  /// No description provided for @backupPageScopeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Backup and import content'**
+  String get backupPageScopeTitle;
+
+  /// No description provided for @backupPageScopeSelectedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{selected}/{total}'**
+  String backupPageScopeSelectedCount(int selected, int total);
+
+  /// No description provided for @backupPageBackupManagementDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose what to back up and import. Applies to local, WebDAV and S3 backups. Unselected content stays unchanged on import. Skills and workspaces include their own files.'**
+  String get backupPageBackupManagementDescription;
+
+  /// No description provided for @backupPageAssistantsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Assistants'**
+  String get backupPageAssistantsLabel;
+
+  /// No description provided for @backupPageProvidersLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Providers'**
+  String get backupPageProvidersLabel;
+
+  /// No description provided for @backupPageMcpLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP servers'**
+  String get backupPageMcpLabel;
+
+  /// No description provided for @backupPageEnvironmentVariablesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Environment variables'**
+  String get backupPageEnvironmentVariablesLabel;
+
+  /// No description provided for @backupPageSkillsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Skills'**
+  String get backupPageSkillsLabel;
+
+  /// No description provided for @backupPageWorldBooksLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'World books'**
+  String get backupPageWorldBooksLabel;
+
+  /// No description provided for @backupPageMemoriesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Memories'**
+  String get backupPageMemoriesLabel;
+
+  /// No description provided for @backupPageQuickPhrasesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick phrases'**
+  String get backupPageQuickPhrasesLabel;
+
+  /// No description provided for @backupPageInstructionsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Prompt injections'**
+  String get backupPageInstructionsLabel;
+
+  /// No description provided for @backupPageWorkspacesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspaces'**
+  String get backupPageWorkspacesLabel;
+
+  /// No description provided for @backupPageSearchServicesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Search services'**
+  String get backupPageSearchServicesLabel;
+
+  /// No description provided for @backupPageSpeechServicesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Speech services'**
+  String get backupPageSpeechServicesLabel;
+
+  /// No description provided for @backupPageSettingsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Other settings'**
+  String get backupPageSettingsLabel;
+
   /// No description provided for @backupPageTestDone.
   ///
   /// In en, this message translates to:
@@ -3535,7 +3649,7 @@ abstract class AppLocalizations {
   /// No description provided for @backupPageSelectImportModeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Choose a restore mode. The chat and file switches determine which components are included.'**
+  /// **'Choose a restore mode. The switches in Backup Management apply to this import.'**
   String get backupPageSelectImportModeDescription;
 
   /// No description provided for @backupPageOverwriteMode.
@@ -3547,7 +3661,7 @@ abstract class AppLocalizations {
   /// No description provided for @backupPageOverwriteModeDescription.
   ///
   /// In en, this message translates to:
-  /// **'Replace the selected components; keep unselected components and unrelated local settings'**
+  /// **'Replace the selected components; keep unselected components and unrelated local settings. Replacing chats also clears local unsent drafts.'**
   String get backupPageOverwriteModeDescription;
 
   /// No description provided for @backupPageMergeMode.
@@ -3627,6 +3741,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancelled'**
   String get backupProgressCancelled;
+
+  /// No description provided for @backupProgressFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Operation failed'**
+  String get backupProgressFailed;
+
+  /// No description provided for @backupProgressFailedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed during: {phase}'**
+  String backupProgressFailedAt(String phase);
+
+  /// No description provided for @backupProgressCopyError.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy error'**
+  String get backupProgressCopyError;
+
+  /// No description provided for @backupProgressErrorCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Error copied'**
+  String get backupProgressErrorCopied;
 
   /// No description provided for @backupProgressPreparing.
   ///
@@ -4516,107 +4654,179 @@ abstract class AppLocalizations {
   /// **'Delete All Versions'**
   String get messageMoreSheetDeleteAllVersions;
 
-  /// No description provided for @reasoningBudgetSheetOff.
-  ///
-  /// In en, this message translates to:
-  /// **'Off'**
-  String get reasoningBudgetSheetOff;
-
-  /// No description provided for @reasoningBudgetSheetAuto.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto'**
-  String get reasoningBudgetSheetAuto;
-
-  /// No description provided for @reasoningBudgetSheetLight.
-  ///
-  /// In en, this message translates to:
-  /// **'Light Reasoning'**
-  String get reasoningBudgetSheetLight;
-
-  /// No description provided for @reasoningBudgetSheetMedium.
-  ///
-  /// In en, this message translates to:
-  /// **'Medium Reasoning'**
-  String get reasoningBudgetSheetMedium;
-
-  /// No description provided for @reasoningBudgetSheetHeavy.
-  ///
-  /// In en, this message translates to:
-  /// **'Heavy Reasoning'**
-  String get reasoningBudgetSheetHeavy;
-
-  /// No description provided for @reasoningBudgetSheetXhigh.
-  ///
-  /// In en, this message translates to:
-  /// **'Extreme Reasoning'**
-  String get reasoningBudgetSheetXhigh;
-
-  /// No description provided for @reasoningBudgetSheetMax.
-  ///
-  /// In en, this message translates to:
-  /// **'Maximum Reasoning'**
-  String get reasoningBudgetSheetMax;
-
   /// No description provided for @reasoningBudgetSheetTitle.
   ///
   /// In en, this message translates to:
   /// **'Reasoning Chain Strength'**
   String get reasoningBudgetSheetTitle;
 
-  /// No description provided for @reasoningBudgetSheetCurrentLevel.
+  /// No description provided for @reasoningLevelSheetTitle.
   ///
   /// In en, this message translates to:
-  /// **'Current Level: {level}'**
-  String reasoningBudgetSheetCurrentLevel(String level);
+  /// **'Reasoning'**
+  String get reasoningLevelSheetTitle;
 
-  /// No description provided for @reasoningBudgetSheetOffSubtitle.
+  /// No description provided for @reasoningLevelAuto.
   ///
   /// In en, this message translates to:
-  /// **'Turn off reasoning, answer directly'**
-  String get reasoningBudgetSheetOffSubtitle;
+  /// **'Auto'**
+  String get reasoningLevelAuto;
 
-  /// No description provided for @reasoningBudgetSheetAutoSubtitle.
+  /// No description provided for @reasoningLevelAutoSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Let the model decide reasoning level automatically'**
-  String get reasoningBudgetSheetAutoSubtitle;
+  /// **'Uses the model or provider default'**
+  String get reasoningLevelAutoSubtitle;
 
-  /// No description provided for @reasoningBudgetSheetLightSubtitle.
+  /// No description provided for @reasoningLevelOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get reasoningLevelOff;
+
+  /// No description provided for @reasoningLevelOffSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off reasoning and answer directly'**
+  String get reasoningLevelOffSubtitle;
+
+  /// No description provided for @reasoningLevelMinimal.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimal'**
+  String get reasoningLevelMinimal;
+
+  /// No description provided for @reasoningLevelMinimalSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the lightest reasoning to answer questions'**
+  String get reasoningLevelMinimalSubtitle;
+
+  /// No description provided for @reasoningLevelLow.
+  ///
+  /// In en, this message translates to:
+  /// **'Low'**
+  String get reasoningLevelLow;
+
+  /// No description provided for @reasoningLevelLowSubtitle.
   ///
   /// In en, this message translates to:
   /// **'Use light reasoning to answer questions'**
-  String get reasoningBudgetSheetLightSubtitle;
+  String get reasoningLevelLowSubtitle;
 
-  /// No description provided for @reasoningBudgetSheetMediumSubtitle.
+  /// No description provided for @reasoningLevelMedium.
+  ///
+  /// In en, this message translates to:
+  /// **'Medium'**
+  String get reasoningLevelMedium;
+
+  /// No description provided for @reasoningLevelMediumSubtitle.
   ///
   /// In en, this message translates to:
   /// **'Use moderate reasoning to answer questions'**
-  String get reasoningBudgetSheetMediumSubtitle;
+  String get reasoningLevelMediumSubtitle;
 
-  /// No description provided for @reasoningBudgetSheetHeavySubtitle.
+  /// No description provided for @reasoningLevelHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'High'**
+  String get reasoningLevelHigh;
+
+  /// No description provided for @reasoningLevelHighSubtitle.
   ///
   /// In en, this message translates to:
   /// **'Use heavy reasoning for complex questions'**
-  String get reasoningBudgetSheetHeavySubtitle;
+  String get reasoningLevelHighSubtitle;
 
-  /// No description provided for @reasoningBudgetSheetXhighSubtitle.
+  /// No description provided for @reasoningLevelXhigh.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra High'**
+  String get reasoningLevelXhigh;
+
+  /// No description provided for @reasoningLevelXhighSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use very high reasoning depth for harder problems'**
+  String get reasoningLevelXhighSubtitle;
+
+  /// No description provided for @reasoningLevelMax.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get reasoningLevelMax;
+
+  /// No description provided for @reasoningLevelMaxSubtitle.
   ///
   /// In en, this message translates to:
   /// **'Use maximum reasoning depth for the toughest problems'**
-  String get reasoningBudgetSheetXhighSubtitle;
+  String get reasoningLevelMaxSubtitle;
 
-  /// No description provided for @reasoningBudgetSheetCustomLabel.
+  /// No description provided for @reasoningLevelFollowModelDefaultSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the model\'s default when the assistant doesn\'t set one'**
+  String get reasoningLevelFollowModelDefaultSubtitle;
+
+  /// No description provided for @reasoningLevelNoReasoning.
+  ///
+  /// In en, this message translates to:
+  /// **'This model does not support reasoning'**
+  String get reasoningLevelNoReasoning;
+
+  /// No description provided for @reasoningLevelCustomBudget.
   ///
   /// In en, this message translates to:
   /// **'Custom Reasoning Budget'**
-  String get reasoningBudgetSheetCustomLabel;
+  String get reasoningLevelCustomBudget;
 
-  /// No description provided for @reasoningBudgetSheetCustomHint.
+  /// No description provided for @reasoningLevelCustomBudgetHint.
   ///
   /// In en, this message translates to:
-  /// **'e.g. 2048 (-1 auto, 0 off)'**
-  String get reasoningBudgetSheetCustomHint;
+  /// **'Token budget, e.g. 2048'**
+  String get reasoningLevelCustomBudgetHint;
+
+  /// No description provided for @reasoningLevelCompactMin.
+  ///
+  /// In en, this message translates to:
+  /// **'min'**
+  String get reasoningLevelCompactMin;
+
+  /// No description provided for @reasoningLevelCompactLow.
+  ///
+  /// In en, this message translates to:
+  /// **'low'**
+  String get reasoningLevelCompactLow;
+
+  /// No description provided for @reasoningLevelCompactMid.
+  ///
+  /// In en, this message translates to:
+  /// **'mid'**
+  String get reasoningLevelCompactMid;
+
+  /// No description provided for @reasoningLevelCompactHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'high'**
+  String get reasoningLevelCompactHigh;
+
+  /// No description provided for @reasoningLevelCompactXhigh.
+  ///
+  /// In en, this message translates to:
+  /// **'xhigh'**
+  String get reasoningLevelCompactXhigh;
+
+  /// No description provided for @reasoningLevelCompactMax.
+  ///
+  /// In en, this message translates to:
+  /// **'max'**
+  String get reasoningLevelCompactMax;
+
+  /// No description provided for @reasoningLevelBudgetTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'{budget} tokens'**
+  String reasoningLevelBudgetTokens(String budget);
 
   /// No description provided for @chatMessageWidgetFileNotFound.
   ///
@@ -4785,6 +4995,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Web Search: {query}'**
   String chatMessageWidgetWebSearch(String query);
+
+  /// No description provided for @chatMessageWidgetWebFetch.
+  ///
+  /// In en, this message translates to:
+  /// **'Read page: {target}'**
+  String chatMessageWidgetWebFetch(String target);
 
   /// No description provided for @chatMessageWidgetBuiltinSearch.
   ///
@@ -5734,6 +5950,42 @@ abstract class AppLocalizations {
   /// **'Recognizing…'**
   String get chatInputBarVoiceTranscribing;
 
+  /// No description provided for @chatInputBarVoiceAttachAudioTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and attach as audio'**
+  String get chatInputBarVoiceAttachAudioTooltip;
+
+  /// No description provided for @chatInputBarVoiceSendAudioTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Send recording'**
+  String get chatInputBarVoiceSendAudioTooltip;
+
+  /// No description provided for @chatInputBarVoiceSavingAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving audio…'**
+  String get chatInputBarVoiceSavingAudio;
+
+  /// No description provided for @audioClipPlayTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Play audio'**
+  String get audioClipPlayTooltip;
+
+  /// No description provided for @audioClipPauseTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get audioClipPauseTooltip;
+
+  /// No description provided for @audioClipPlaybackFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t play this audio'**
+  String get audioClipPlaybackFailed;
+
   /// No description provided for @chatInputBarImageProcessing.
   ///
   /// In en, this message translates to:
@@ -5781,6 +6033,156 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Collapse'**
   String get chatInputBarCollapse;
+
+  /// No description provided for @contextUsageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Context window'**
+  String get contextUsageTitle;
+
+  /// No description provided for @contextUsageStateExact.
+  ///
+  /// In en, this message translates to:
+  /// **'Exact (from last response)'**
+  String get contextUsageStateExact;
+
+  /// No description provided for @contextUsageStateExactCalibrated.
+  ///
+  /// In en, this message translates to:
+  /// **'Exact (breakdown scaled from estimate)'**
+  String get contextUsageStateExactCalibrated;
+
+  /// No description provided for @contextUsageStateEstimated.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated'**
+  String get contextUsageStateEstimated;
+
+  /// No description provided for @contextUsageStateStale.
+  ///
+  /// In en, this message translates to:
+  /// **'Stale, updating…'**
+  String get contextUsageStateStale;
+
+  /// No description provided for @contextUsageStateComputing.
+  ///
+  /// In en, this message translates to:
+  /// **'Computing…'**
+  String get contextUsageStateComputing;
+
+  /// No description provided for @contextUsageStateNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No data yet'**
+  String get contextUsageStateNone;
+
+  /// No description provided for @contextUsageBucketSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System prompt'**
+  String get contextUsageBucketSystem;
+
+  /// No description provided for @contextUsageBucketInjections.
+  ///
+  /// In en, this message translates to:
+  /// **'Instruction injections'**
+  String get contextUsageBucketInjections;
+
+  /// No description provided for @contextUsageBucketHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages'**
+  String get contextUsageBucketHistory;
+
+  /// No description provided for @contextUsageBucketTools.
+  ///
+  /// In en, this message translates to:
+  /// **'Built-in tools'**
+  String get contextUsageBucketTools;
+
+  /// No description provided for @contextUsageBucketMemory.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory'**
+  String get contextUsageBucketMemory;
+
+  /// No description provided for @contextUsageBucketWorldBook.
+  ///
+  /// In en, this message translates to:
+  /// **'World books'**
+  String get contextUsageBucketWorldBook;
+
+  /// No description provided for @contextUsageBucketSkills.
+  ///
+  /// In en, this message translates to:
+  /// **'Skills'**
+  String get contextUsageBucketSkills;
+
+  /// No description provided for @contextUsageBucketWorkspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace'**
+  String get contextUsageBucketWorkspace;
+
+  /// No description provided for @contextUsageBucketSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search prompt'**
+  String get contextUsageBucketSearch;
+
+  /// No description provided for @contextUsageBucketMcpTools.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP tools'**
+  String get contextUsageBucketMcpTools;
+
+  /// No description provided for @contextUsageBucketAttachments.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachments'**
+  String get contextUsageBucketAttachments;
+
+  /// No description provided for @contextUsageBucketDraft.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft'**
+  String get contextUsageBucketDraft;
+
+  /// No description provided for @contextUsageBucketUsed.
+  ///
+  /// In en, this message translates to:
+  /// **'Used'**
+  String get contextUsageBucketUsed;
+
+  /// No description provided for @contextUsageFreeSpace.
+  ///
+  /// In en, this message translates to:
+  /// **'Free space'**
+  String get contextUsageFreeSpace;
+
+  /// Context usage summary: used tokens, window size, and percent
+  ///
+  /// In en, this message translates to:
+  /// **'{used} / {window} ({percent}%)'**
+  String contextUsageUsedWindow(String used, String window, int percent);
+
+  /// No description provided for @contextUsageNoWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'No context window'**
+  String get contextUsageNoWindow;
+
+  /// No description provided for @contextUsageSetWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'Set context window'**
+  String get contextUsageSetWindow;
+
+  /// No description provided for @contextUsageRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get contextUsageRefresh;
 
   /// No description provided for @mcpPageBackTooltip.
   ///
@@ -6433,12 +6835,6 @@ abstract class AppLocalizations {
   /// **'Required, suggest lowercase/digits/hyphens'**
   String get modelDetailSheetModelIdHint;
 
-  /// No description provided for @modelDetailSheetModelIdDisabledHint.
-  ///
-  /// In en, this message translates to:
-  /// **'{modelId}'**
-  String modelDetailSheetModelIdDisabledHint(String modelId);
-
   /// No description provided for @modelDetailSheetModelNameLabel.
   ///
   /// In en, this message translates to:
@@ -6546,18 +6942,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Built-in tools depend on the provider and API mode.'**
   String get modelDetailSheetBuiltinToolsDescription;
-
-  /// No description provided for @modelDetailSheetSearchTool.
-  ///
-  /// In en, this message translates to:
-  /// **'Search'**
-  String get modelDetailSheetSearchTool;
-
-  /// No description provided for @modelDetailSheetSearchToolDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Enable Google Search integration'**
-  String get modelDetailSheetSearchToolDescription;
 
   /// No description provided for @modelDetailSheetUrlContextTool.
   ///
@@ -6685,12 +7069,6 @@ abstract class AppLocalizations {
   /// **'Please enter a valid model ID (>=2 chars)'**
   String get modelDetailSheetInvalidIdError;
 
-  /// No description provided for @modelDetailSheetModelIdExistsError.
-  ///
-  /// In en, this message translates to:
-  /// **'Model ID already exists'**
-  String get modelDetailSheetModelIdExistsError;
-
   /// No description provided for @modelDetailSheetHeaderKeyHint.
   ///
   /// In en, this message translates to:
@@ -6714,6 +7092,552 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Body JSON'**
   String get modelDetailSheetBodyJsonHint;
+
+  /// No description provided for @modelSpecFormSourceCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get modelSpecFormSourceCustom;
+
+  /// No description provided for @modelSpecFormSourceCatalog.
+  ///
+  /// In en, this message translates to:
+  /// **'Catalog'**
+  String get modelSpecFormSourceCatalog;
+
+  /// No description provided for @modelSpecFormSourceInferred.
+  ///
+  /// In en, this message translates to:
+  /// **'Inferred'**
+  String get modelSpecFormSourceInferred;
+
+  /// No description provided for @modelSpecFormSourceDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get modelSpecFormSourceDefault;
+
+  /// No description provided for @modelSpecFormReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to default'**
+  String get modelSpecFormReset;
+
+  /// No description provided for @modelSpecFormModalitiesSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Modalities & abilities'**
+  String get modelSpecFormModalitiesSection;
+
+  /// No description provided for @modelSpecFormImageType.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get modelSpecFormImageType;
+
+  /// No description provided for @modelSpecFormAudioMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get modelSpecFormAudioMode;
+
+  /// No description provided for @modelSpecFormVideoMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get modelSpecFormVideoMode;
+
+  /// No description provided for @modelSpecFormPdfMode.
+  ///
+  /// In en, this message translates to:
+  /// **'PDF'**
+  String get modelSpecFormPdfMode;
+
+  /// No description provided for @modelSpecFormStructuredOutputAbility.
+  ///
+  /// In en, this message translates to:
+  /// **'Structured Output'**
+  String get modelSpecFormStructuredOutputAbility;
+
+  /// No description provided for @modelSpecFormReasoningSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning'**
+  String get modelSpecFormReasoningSection;
+
+  /// No description provided for @modelSpecFormDialect.
+  ///
+  /// In en, this message translates to:
+  /// **'Dialect'**
+  String get modelSpecFormDialect;
+
+  /// No description provided for @modelSpecFormDialectNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get modelSpecFormDialectNone;
+
+  /// No description provided for @modelSpecFormDialectNoneSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'No reasoning fields'**
+  String get modelSpecFormDialectNoneSubtitle;
+
+  /// No description provided for @modelSpecFormDialectOpenaiReasoningEffort.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI reasoning effort'**
+  String get modelSpecFormDialectOpenaiReasoningEffort;
+
+  /// No description provided for @modelSpecFormDialectOpenaiReasoningEffortSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning_effort'**
+  String get modelSpecFormDialectOpenaiReasoningEffortSubtitle;
+
+  /// No description provided for @modelSpecFormDialectOpenaiResponsesReasoning.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI Responses reasoning'**
+  String get modelSpecFormDialectOpenaiResponsesReasoning;
+
+  /// No description provided for @modelSpecFormDialectOpenaiResponsesReasoningSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning.effort'**
+  String get modelSpecFormDialectOpenaiResponsesReasoningSubtitle;
+
+  /// No description provided for @modelSpecFormDialectOpenrouterReasoning.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenRouter reasoning'**
+  String get modelSpecFormDialectOpenrouterReasoning;
+
+  /// No description provided for @modelSpecFormDialectOpenrouterReasoningSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning'**
+  String get modelSpecFormDialectOpenrouterReasoningSubtitle;
+
+  /// No description provided for @modelSpecFormDialectAnthropicBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Anthropic budget'**
+  String get modelSpecFormDialectAnthropicBudget;
+
+  /// No description provided for @modelSpecFormDialectAnthropicBudgetSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking.budget_tokens'**
+  String get modelSpecFormDialectAnthropicBudgetSubtitle;
+
+  /// No description provided for @modelSpecFormDialectAnthropicAdaptiveEffort.
+  ///
+  /// In en, this message translates to:
+  /// **'Anthropic adaptive effort'**
+  String get modelSpecFormDialectAnthropicAdaptiveEffort;
+
+  /// No description provided for @modelSpecFormDialectAnthropicAdaptiveEffortSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking + output_config.effort'**
+  String get modelSpecFormDialectAnthropicAdaptiveEffortSubtitle;
+
+  /// No description provided for @modelSpecFormDialectAnthropicEffort.
+  ///
+  /// In en, this message translates to:
+  /// **'Anthropic effort'**
+  String get modelSpecFormDialectAnthropicEffort;
+
+  /// No description provided for @modelSpecFormDialectAnthropicEffortSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking + output_config.effort'**
+  String get modelSpecFormDialectAnthropicEffortSubtitle;
+
+  /// No description provided for @modelSpecFormDialectGeminiThinkingBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Gemini thinking budget'**
+  String get modelSpecFormDialectGeminiThinkingBudget;
+
+  /// No description provided for @modelSpecFormDialectGeminiThinkingBudgetSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinkingConfig.thinkingBudget'**
+  String get modelSpecFormDialectGeminiThinkingBudgetSubtitle;
+
+  /// No description provided for @modelSpecFormDialectGeminiThinkingLevel.
+  ///
+  /// In en, this message translates to:
+  /// **'Gemini thinking level'**
+  String get modelSpecFormDialectGeminiThinkingLevel;
+
+  /// No description provided for @modelSpecFormDialectGeminiThinkingLevelSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinkingConfig.thinkingLevel'**
+  String get modelSpecFormDialectGeminiThinkingLevelSubtitle;
+
+  /// No description provided for @modelSpecFormDialectQwenEnableThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Qwen enable thinking'**
+  String get modelSpecFormDialectQwenEnableThinking;
+
+  /// No description provided for @modelSpecFormDialectQwenEnableThinkingSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'enable_thinking'**
+  String get modelSpecFormDialectQwenEnableThinkingSubtitle;
+
+  /// No description provided for @modelSpecFormDialectThinkingType.
+  ///
+  /// In en, this message translates to:
+  /// **'Thinking type'**
+  String get modelSpecFormDialectThinkingType;
+
+  /// No description provided for @modelSpecFormDialectThinkingTypeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking.type'**
+  String get modelSpecFormDialectThinkingTypeSubtitle;
+
+  /// No description provided for @modelSpecFormDialectSiliconflowEnableThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'SiliconFlow enable thinking'**
+  String get modelSpecFormDialectSiliconflowEnableThinking;
+
+  /// No description provided for @modelSpecFormDialectSiliconflowEnableThinkingSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'enable_thinking'**
+  String get modelSpecFormDialectSiliconflowEnableThinkingSubtitle;
+
+  /// No description provided for @modelSpecFormDialectInternThinkingMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Intern thinking mode'**
+  String get modelSpecFormDialectInternThinkingMode;
+
+  /// No description provided for @modelSpecFormDialectInternThinkingModeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking_mode'**
+  String get modelSpecFormDialectInternThinkingModeSubtitle;
+
+  /// No description provided for @modelSpecFormDialectChatTemplateKwargs.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat template kwargs'**
+  String get modelSpecFormDialectChatTemplateKwargs;
+
+  /// No description provided for @modelSpecFormDialectChatTemplateKwargsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'chat_template_kwargs.enable_thinking'**
+  String get modelSpecFormDialectChatTemplateKwargsSubtitle;
+
+  /// No description provided for @modelSpecFormDialectKimiThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Kimi thinking'**
+  String get modelSpecFormDialectKimiThinking;
+
+  /// No description provided for @modelSpecFormDialectKimiThinkingSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'thinking'**
+  String get modelSpecFormDialectKimiThinkingSubtitle;
+
+  /// No description provided for @modelSpecFormDialectCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom JSON'**
+  String get modelSpecFormDialectCustom;
+
+  /// No description provided for @modelSpecFormDialectCustomSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Per-level JSON patch'**
+  String get modelSpecFormDialectCustomSubtitle;
+
+  /// No description provided for @modelSpecFormLevels.
+  ///
+  /// In en, this message translates to:
+  /// **'Supported levels'**
+  String get modelSpecFormLevels;
+
+  /// No description provided for @modelSpecFormCanDisable.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow disabling'**
+  String get modelSpecFormCanDisable;
+
+  /// No description provided for @modelSpecFormDefaultLevel.
+  ///
+  /// In en, this message translates to:
+  /// **'Default level'**
+  String get modelSpecFormDefaultLevel;
+
+  /// No description provided for @modelSpecFormBudgets.
+  ///
+  /// In en, this message translates to:
+  /// **'Token budgets'**
+  String get modelSpecFormBudgets;
+
+  /// No description provided for @modelSpecFormBudgetPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'{tokens}'**
+  String modelSpecFormBudgetPlaceholder(String tokens);
+
+  /// No description provided for @modelSpecFormCustomPatch.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON patch ({level})'**
+  String modelSpecFormCustomPatch(String level);
+
+  /// No description provided for @modelSpecFormCustomPatchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. reasoning_effort: high'**
+  String get modelSpecFormCustomPatchHint;
+
+  /// No description provided for @modelSpecFormInvalidJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom reasoning patch must be a valid JSON object'**
+  String get modelSpecFormInvalidJson;
+
+  /// No description provided for @modelSpecFormInvalidNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a valid number'**
+  String get modelSpecFormInvalidNumber;
+
+  /// No description provided for @modelSpecFormStrategySection.
+  ///
+  /// In en, this message translates to:
+  /// **'Strategy'**
+  String get modelSpecFormStrategySection;
+
+  /// No description provided for @modelSpecFormSampling.
+  ///
+  /// In en, this message translates to:
+  /// **'Sampling'**
+  String get modelSpecFormSampling;
+
+  /// No description provided for @modelSpecFormRequestQuirks.
+  ///
+  /// In en, this message translates to:
+  /// **'Request compatibility'**
+  String get modelSpecFormRequestQuirks;
+
+  /// No description provided for @modelSpecFormDynamicWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Dynamic filtering search tools'**
+  String get modelSpecFormDynamicWebSearch;
+
+  /// No description provided for @modelSpecFormDynamicWebSearchSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'When dynamic filtering is on, send the 2026-03-18 web search and fetch tools'**
+  String get modelSpecFormDynamicWebSearchSubtitle;
+
+  /// No description provided for @modelSpecFormRemoteImageUrls.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote image links'**
+  String get modelSpecFormRemoteImageUrls;
+
+  /// No description provided for @modelSpecFormRemoteImageUrlsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Send http(s) image links as-is; when off, remote links are dropped and only local images are sent'**
+  String get modelSpecFormRemoteImageUrlsSubtitle;
+
+  /// No description provided for @modelSpecFormPromptCacheControl.
+  ///
+  /// In en, this message translates to:
+  /// **'Prompt cache marker'**
+  String get modelSpecFormPromptCacheControl;
+
+  /// No description provided for @modelSpecFormPromptCacheControlSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'When prompt caching is on, add cache_control to OpenRouter requests'**
+  String get modelSpecFormPromptCacheControlSubtitle;
+
+  /// No description provided for @modelSpecFormSamplingAlways.
+  ///
+  /// In en, this message translates to:
+  /// **'Always'**
+  String get modelSpecFormSamplingAlways;
+
+  /// No description provided for @modelSpecFormSamplingAlwaysSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep temperature and other sampling fields'**
+  String get modelSpecFormSamplingAlwaysSubtitle;
+
+  /// No description provided for @modelSpecFormSamplingOnlyWhenReasoningOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Only when reasoning is off'**
+  String get modelSpecFormSamplingOnlyWhenReasoningOff;
+
+  /// No description provided for @modelSpecFormSamplingOnlyWhenReasoningOffSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Strip sampling fields while the model is thinking'**
+  String get modelSpecFormSamplingOnlyWhenReasoningOffSubtitle;
+
+  /// No description provided for @modelSpecFormSamplingNever.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get modelSpecFormSamplingNever;
+
+  /// No description provided for @modelSpecFormSamplingNeverSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Always strip sampling fields'**
+  String get modelSpecFormSamplingNeverSubtitle;
+
+  /// No description provided for @modelSpecFormReplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning replay'**
+  String get modelSpecFormReplay;
+
+  /// No description provided for @modelSpecFormReplayNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get modelSpecFormReplayNone;
+
+  /// No description provided for @modelSpecFormReplayNoneSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Do not send prior reasoning back to the model'**
+  String get modelSpecFormReplayNoneSubtitle;
+
+  /// No description provided for @modelSpecFormReplayToolTurns.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool turns'**
+  String get modelSpecFormReplayToolTurns;
+
+  /// No description provided for @modelSpecFormReplayToolTurnsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay reasoning on tool-call turns'**
+  String get modelSpecFormReplayToolTurnsSubtitle;
+
+  /// No description provided for @modelSpecFormReplayAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get modelSpecFormReplayAll;
+
+  /// No description provided for @modelSpecFormReplayAllSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay reasoning on every follow-up turn'**
+  String get modelSpecFormReplayAllSubtitle;
+
+  /// No description provided for @modelSpecFormReplayField.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay field'**
+  String get modelSpecFormReplayField;
+
+  /// No description provided for @modelSpecFormReplayFieldReasoningContent.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning_content'**
+  String get modelSpecFormReplayFieldReasoningContent;
+
+  /// No description provided for @modelSpecFormReplayFieldReasoning.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning'**
+  String get modelSpecFormReplayFieldReasoning;
+
+  /// No description provided for @modelSpecFormReplayFieldReasoningDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'reasoning_details'**
+  String get modelSpecFormReplayFieldReasoningDetails;
+
+  /// No description provided for @modelSpecFormLimitsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Limits'**
+  String get modelSpecFormLimitsSection;
+
+  /// No description provided for @modelSpecFormLimitsPricingSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Limits & pricing'**
+  String get modelSpecFormLimitsPricingSection;
+
+  /// No description provided for @modelSpecFormContextWindow.
+  ///
+  /// In en, this message translates to:
+  /// **'Context window'**
+  String get modelSpecFormContextWindow;
+
+  /// No description provided for @modelSpecFormMaxOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Max output'**
+  String get modelSpecFormMaxOutput;
+
+  /// No description provided for @modelSpecFormPricingSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Pricing / 1M'**
+  String get modelSpecFormPricingSection;
+
+  /// No description provided for @modelSpecFormPricingInput.
+  ///
+  /// In en, this message translates to:
+  /// **'Input'**
+  String get modelSpecFormPricingInput;
+
+  /// No description provided for @modelSpecFormPricingOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Output'**
+  String get modelSpecFormPricingOutput;
+
+  /// No description provided for @modelSpecFormPricingCacheRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache read'**
+  String get modelSpecFormPricingCacheRead;
+
+  /// No description provided for @modelSpecFormPricingCacheWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache write'**
+  String get modelSpecFormPricingCacheWrite;
+
+  /// No description provided for @modelSpecFormCurrency.
+  ///
+  /// In en, this message translates to:
+  /// **'Currency'**
+  String get modelSpecFormCurrency;
+
+  /// No description provided for @modelSpecFormAdvancedSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Request'**
+  String get modelSpecFormAdvancedSection;
 
   /// No description provided for @modelSelectSheetSearchHint.
   ///
@@ -6870,6 +7794,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Response API (/responses)'**
   String get providerDetailPageResponseApiTitle;
+
+  /// No description provided for @providerDetailPagePromptCacheKeyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Send Conversation Cache Key'**
+  String get providerDetailPagePromptCacheKeyTitle;
+
+  /// No description provided for @providerDetailPagePromptCacheKeyHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Adds a stable prompt_cache_key for each conversation to OpenAI-compatible requests. Enable only if your provider supports it. Custom Body values take precedence; cache hits are not guaranteed.'**
+  String get providerDetailPagePromptCacheKeyHelp;
 
   /// No description provided for @providerDetailPageAihubmixAppCodeLabel.
   ///
@@ -7230,6 +8166,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Provider added'**
   String get providersPageProviderAddedSnackbar;
+
+  /// No description provided for @modelCatalogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Model catalog'**
+  String get modelCatalogTitle;
+
+  /// No description provided for @modelCatalogSourceBundled.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundled snapshot · {date}'**
+  String modelCatalogSourceBundled(String date);
+
+  /// No description provided for @modelCatalogSourceRemote.
+  ///
+  /// In en, this message translates to:
+  /// **'models.dev · updated {date}'**
+  String modelCatalogSourceRemote(String date);
+
+  /// No description provided for @modelCatalogAutoUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-update every 24 hours'**
+  String get modelCatalogAutoUpdate;
+
+  /// No description provided for @modelCatalogRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Update now'**
+  String get modelCatalogRefresh;
+
+  /// No description provided for @modelCatalogUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Model catalog updated'**
+  String get modelCatalogUpdated;
+
+  /// No description provided for @modelCatalogRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Update failed: {error}'**
+  String modelCatalogRefreshFailed(String error);
+
+  /// No description provided for @modelCatalogProviderCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} providers'**
+  String modelCatalogProviderCount(int count);
+
+  /// No description provided for @modelCatalogModelCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} models'**
+  String modelCatalogModelCount(int count);
 
   /// No description provided for @providerGroupsGroupLabel.
   ///
@@ -7657,6 +8647,78 @@ abstract class AppLocalizations {
   /// **'Auto-test connections on launch'**
   String get searchServicesPageAutoTestTitle;
 
+  /// No description provided for @searchServicesPageWebFetchSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Web page reading'**
+  String get searchServicesPageWebFetchSection;
+
+  /// No description provided for @searchServicesPageWebFetchModeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Read pages with'**
+  String get searchServicesPageWebFetchModeTitle;
+
+  /// No description provided for @searchServicesPageWebFetchFollow.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow search service'**
+  String get searchServicesPageWebFetchFollow;
+
+  /// No description provided for @searchServicesPageWebFetchFollowValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow search · {name}'**
+  String searchServicesPageWebFetchFollowValue(String name);
+
+  /// No description provided for @searchServicesPageWebFetchFollowSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Currently {name}'**
+  String searchServicesPageWebFetchFollowSubtitle(String name);
+
+  /// No description provided for @searchServicesPageWebFetchLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get searchServicesPageWebFetchLocal;
+
+  /// No description provided for @searchServicesPageWebFetchLocalSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Free. This device requests the page directly.'**
+  String get searchServicesPageWebFetchLocalSubtitle;
+
+  /// No description provided for @searchServicesPageWebFetchProviderSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Uses this service\'s API key and quota'**
+  String get searchServicesPageWebFetchProviderSubtitle;
+
+  /// No description provided for @searchServicesPageWebFetchOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get searchServicesPageWebFetchOff;
+
+  /// No description provided for @searchServicesPageWebFetchOffSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Search only, without reading pages'**
+  String get searchServicesPageWebFetchOffSubtitle;
+
+  /// No description provided for @searchServicesPageWebFetchFooter.
+  ///
+  /// In en, this message translates to:
+  /// **'With web search on, the model can also read full pages. When the search service can\'t read pages, local reading is used, which can\'t handle pages that need JavaScript or block bots.'**
+  String get searchServicesPageWebFetchFooter;
+
+  /// No description provided for @searchServicesPageWebFetchSupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Can read web pages'**
+  String get searchServicesPageWebFetchSupported;
+
   /// No description provided for @searchServicesPageMaxResults.
   ///
   /// In en, this message translates to:
@@ -7812,6 +8874,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'API Key'**
   String get searchServicesDialogApiKey;
+
+  /// No description provided for @searchServicesDialogApiKeyOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'API Key (optional)'**
+  String get searchServicesDialogApiKeyOptional;
 
   /// No description provided for @searchServicesDialogModel.
   ///
@@ -8094,6 +9162,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search failed: {message}'**
   String searchServiceEditorTestFailed(String message);
+
+  /// No description provided for @searchServiceEditorTestModeSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get searchServiceEditorTestModeSearch;
+
+  /// No description provided for @searchServiceEditorTestModeFetch.
+  ///
+  /// In en, this message translates to:
+  /// **'Read page'**
+  String get searchServiceEditorTestModeFetch;
+
+  /// No description provided for @searchServiceEditorTestUrlHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a URL'**
+  String get searchServiceEditorTestUrlHint;
+
+  /// No description provided for @searchServiceEditorTestFetchRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Run test fetch'**
+  String get searchServiceEditorTestFetchRun;
+
+  /// No description provided for @searchServiceEditorTestFetchRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading…'**
+  String get searchServiceEditorTestFetchRunning;
+
+  /// No description provided for @searchServiceEditorTestFetchFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Fetch failed: {message}'**
+  String searchServiceEditorTestFetchFailed(String message);
+
+  /// No description provided for @searchServiceEditorTestFetchStats.
+  ///
+  /// In en, this message translates to:
+  /// **'{characters} characters · {seconds}s'**
+  String searchServiceEditorTestFetchStats(String characters, String seconds);
 
   /// No description provided for @searchServiceEditorResultOpenTooltip.
   ///
@@ -8461,6 +9571,18 @@ abstract class AppLocalizations {
   /// **'Show Token & Context Stats'**
   String get displaySettingsPageShowTokenStatsTitle;
 
+  /// No description provided for @displaySettingsPageShowTotalTokensTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show tokens for the entire turn'**
+  String get displaySettingsPageShowTotalTokensTitle;
+
+  /// No description provided for @displaySettingsPageShowTotalTokensSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sum usage across all API requests in a reply. When off, show only the final request. Statistics always include all requests.'**
+  String get displaySettingsPageShowTotalTokensSubtitle;
+
   /// No description provided for @displaySettingsPageShowTokenStatsSubtitle.
   ///
   /// In en, this message translates to:
@@ -8490,6 +9612,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'When off, tool-use cards are hidden in chat.'**
   String get displaySettingsPageShowToolCardsSubtitle;
+
+  /// No description provided for @displaySettingsShowReasoningLevelBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'Show reasoning level on the button'**
+  String get displaySettingsShowReasoningLevelBadge;
+
+  /// No description provided for @displaySettingsShowReasoningLevelBadgeSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the current level next to the reasoning icon in the input bar'**
+  String get displaySettingsShowReasoningLevelBadgeSubtitle;
 
   /// No description provided for @displaySettingsPageAutoCollapseThinkingTitle.
   ///
@@ -10267,6 +11401,12 @@ abstract class AppLocalizations {
   /// **'Neural search with semantic understanding. Great for research and finding specific content.'**
   String get searchProviderExaDescription;
 
+  /// No description provided for @searchProviderExaMcpDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Exa search via MCP. An API key is optional for limited free usage.'**
+  String get searchProviderExaMcpDescription;
+
   /// No description provided for @searchProviderLinkUpDescription.
   ///
   /// In en, this message translates to:
@@ -10332,6 +11472,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Exa'**
   String get searchServiceNameExa;
+
+  /// No description provided for @searchServiceNameExaMcp.
+  ///
+  /// In en, this message translates to:
+  /// **'Exa MCP'**
+  String get searchServiceNameExaMcp;
 
   /// No description provided for @searchServiceNameZhipu.
   ///
@@ -14299,6 +15445,12 @@ abstract class AppLocalizations {
   /// **'At depth'**
   String get worldBookInjectionPositionAtDepth;
 
+  /// No description provided for @worldBookImportUnsupportedEntries.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported. {count} entries use unsupported SillyTavern features (such as macros, regex, timing, filters, or insertion rules). Their content was kept and they were disabled. Review them before enabling.'**
+  String worldBookImportUnsupportedEntries(int count);
+
   /// No description provided for @worldBookInjectionRoleUser.
   ///
   /// In en, this message translates to:
@@ -14437,11 +15589,35 @@ abstract class AppLocalizations {
   /// **'{value}s'**
   String tokenDetailDuration(String value);
 
+  /// No description provided for @tokenDetailFirstToken.
+  ///
+  /// In en, this message translates to:
+  /// **'{value}s (first token)'**
+  String tokenDetailFirstToken(String value);
+
   /// No description provided for @tokenDetailTotalTokens.
   ///
   /// In en, this message translates to:
   /// **'{count} tokens'**
   String tokenDetailTotalTokens(int count);
+
+  /// No description provided for @tokenDetailReasoningTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tokens'**
+  String tokenDetailReasoningTokens(int count);
+
+  /// No description provided for @tokenDetailCacheWriteTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} cache write tokens'**
+  String tokenDetailCacheWriteTokens(int count);
+
+  /// No description provided for @tokenDetailCost.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount}'**
+  String tokenDetailCost(String amount);
 
   /// No description provided for @debugPageTitle.
   ///
@@ -15874,7 +17050,7 @@ abstract class AppLocalizations {
   /// No description provided for @localSnapshotRestoreMessage.
   ///
   /// In en, this message translates to:
-  /// **'Your current chats and settings will be replaced by this copy from {when}. A copy of what you have now is saved first, so this can be undone.'**
+  /// **'Your current chats and settings will be replaced by this copy from {when}. A copy of the current chats and settings is saved first. Unsent drafts are excluded from copies and will be cleared.'**
   String localSnapshotRestoreMessage(String when);
 
   /// No description provided for @localSnapshotRestorePreparing.
@@ -16794,6 +17970,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Read file'**
   String get workspaceToolTitleReadFile;
+
+  /// No description provided for @workspaceToolTitleViewImage.
+  ///
+  /// In en, this message translates to:
+  /// **'View image'**
+  String get workspaceToolTitleViewImage;
 
   /// No description provided for @workspaceToolTitleWriteFile.
   ///
@@ -19089,6 +20271,12 @@ abstract class AppLocalizations {
   /// **'Read files with line numbers and paging.'**
   String get workspaceToolHelpRead;
 
+  /// No description provided for @workspaceToolHelpViewImage.
+  ///
+  /// In en, this message translates to:
+  /// **'Let the model inspect an image from the workspace.'**
+  String get workspaceToolHelpViewImage;
+
   /// No description provided for @workspaceToolHelpWrite.
   ///
   /// In en, this message translates to:
@@ -19568,36 +20756,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Show files created or modified by tools below replies.'**
   String get displaySettingsPageShowProducedFilesSubtitle;
-
-  /// No description provided for @reasoningBudgetSliderLow.
-  ///
-  /// In en, this message translates to:
-  /// **'Low'**
-  String get reasoningBudgetSliderLow;
-
-  /// No description provided for @reasoningBudgetSliderMedium.
-  ///
-  /// In en, this message translates to:
-  /// **'Medium'**
-  String get reasoningBudgetSliderMedium;
-
-  /// No description provided for @reasoningBudgetSliderHigh.
-  ///
-  /// In en, this message translates to:
-  /// **'High'**
-  String get reasoningBudgetSliderHigh;
-
-  /// No description provided for @reasoningBudgetSliderXhigh.
-  ///
-  /// In en, this message translates to:
-  /// **'XHigh'**
-  String get reasoningBudgetSliderXhigh;
-
-  /// No description provided for @reasoningBudgetSliderMax.
-  ///
-  /// In en, this message translates to:
-  /// **'Max'**
-  String get reasoningBudgetSliderMax;
 
   /// No description provided for @defaultModelPagePerChatModelTitle.
   ///
@@ -21303,6 +22461,12 @@ abstract class AppLocalizations {
   /// **'Resets {time}'**
   String oauthResetsAt(String time);
 
+  /// No description provided for @oauthUsedValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Used {value}'**
+  String oauthUsedValue(String value);
+
   /// No description provided for @oauthNetworkError.
   ///
   /// In en, this message translates to:
@@ -21941,6 +23105,180 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Allow this assistant to use phone control'**
   String get phoneControlEnableAssistant;
+
+  /// No description provided for @composerDraftLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft'**
+  String get composerDraftLabel;
+
+  /// No description provided for @composerDraftRecovered.
+  ///
+  /// In en, this message translates to:
+  /// **'An unsent message was recovered.'**
+  String get composerDraftRecovered;
+
+  /// No description provided for @composerDraftRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue editing'**
+  String get composerDraftRestore;
+
+  /// No description provided for @composerDraftDiscard.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard'**
+  String get composerDraftDiscard;
+
+  /// No description provided for @composerDraftSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Your latest draft could not be saved. It is still in this window.'**
+  String get composerDraftSaveFailed;
+
+  /// No description provided for @composerDraftRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry saving'**
+  String get composerDraftRetry;
+
+  /// No description provided for @composerDraftConflictTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'This conversation already has a draft'**
+  String get composerDraftConflictTitle;
+
+  /// No description provided for @composerDraftConflictBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Append keeps both texts and attachments. Replace discards the existing draft. Nothing is sent automatically.'**
+  String get composerDraftConflictBody;
+
+  /// No description provided for @composerDraftAppend.
+  ///
+  /// In en, this message translates to:
+  /// **'Append'**
+  String get composerDraftAppend;
+
+  /// No description provided for @composerDraftReplace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace draft'**
+  String get composerDraftReplace;
+
+  /// No description provided for @composerDraftMissingFile.
+  ///
+  /// In en, this message translates to:
+  /// **'An attachment is unavailable. Remove it or choose the file again.'**
+  String get composerDraftMissingFile;
+
+  /// No description provided for @composerDraftMessageMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The message being edited no longer exists. Copy the text to a new message or discard this edit.'**
+  String get composerDraftMessageMissing;
+
+  /// No description provided for @composerDraftDeleteNotice.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsent drafts in these conversations will also be deleted.'**
+  String get composerDraftDeleteNotice;
+
+  /// No description provided for @mcpOAuthSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'OAuth settings'**
+  String get mcpOAuthSettings;
+
+  /// No description provided for @mcpOAuthAutomatic.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic'**
+  String get mcpOAuthAutomatic;
+
+  /// No description provided for @mcpOAuthMetadataUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Client metadata document URL'**
+  String get mcpOAuthMetadataUrl;
+
+  /// No description provided for @mcpOAuthClientAuthentication.
+  ///
+  /// In en, this message translates to:
+  /// **'Client authentication'**
+  String get mcpOAuthClientAuthentication;
+
+  /// No description provided for @mcpOAuthPublicClient.
+  ///
+  /// In en, this message translates to:
+  /// **'Public client'**
+  String get mcpOAuthPublicClient;
+
+  /// No description provided for @mcpOAuthRedirectUri.
+  ///
+  /// In en, this message translates to:
+  /// **'Local callback URL (optional)'**
+  String get mcpOAuthRedirectUri;
+
+  /// No description provided for @mcpOAuthFillRedirectExample.
+  ///
+  /// In en, this message translates to:
+  /// **'Fill example'**
+  String get mcpOAuthFillRedirectExample;
+
+  /// No description provided for @mcpOAuthRedirectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave empty to use the platform default. Use an HTTP loopback URL if the service only allows localhost callbacks. Port 0 selects an available port; a pre-registered client may require a fixed port.'**
+  String get mcpOAuthRedirectHint;
+
+  /// No description provided for @mcpOAuthClientIdRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a client ID or choose automatic registration.'**
+  String get mcpOAuthClientIdRequired;
+
+  /// No description provided for @mcpOAuthMetadataUrlInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter an HTTPS metadata document URL with a path.'**
+  String get mcpOAuthMetadataUrlInvalid;
+
+  /// No description provided for @mcpOAuthSecretRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'This client authentication method requires a client secret.'**
+  String get mcpOAuthSecretRequired;
+
+  /// No description provided for @mcpOAuthRedirectInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Use an HTTP callback on localhost, 127.0.0.1 or [::1], without credentials, query parameters or a fragment.'**
+  String get mcpOAuthRedirectInvalid;
+
+  /// No description provided for @mcpOAuthDiscovering.
+  ///
+  /// In en, this message translates to:
+  /// **'Discovering authorization server…'**
+  String get mcpOAuthDiscovering;
+
+  /// No description provided for @mcpOAuthRegistering.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing authorization…'**
+  String get mcpOAuthRegistering;
+
+  /// No description provided for @mcpOAuthWaitingBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for browser authorization…'**
+  String get mcpOAuthWaitingBrowser;
+
+  /// No description provided for @mcpOAuthExchangingToken.
+  ///
+  /// In en, this message translates to:
+  /// **'Completing sign-in…'**
+  String get mcpOAuthExchangingToken;
 }
 
 class _AppLocalizationsDelegate

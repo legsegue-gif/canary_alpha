@@ -337,15 +337,6 @@ class SettingsSearchIndex {
             'background keep alive notification live activity 后台 後台 保活 灵动岛 靈動島',
       );
     }
-    if (!kIsWeb && platform == TargetPlatform.android) {
-      add(
-        'phoneControl',
-        SettingsSearchDestination.phoneControl,
-        (l) => l.phoneControlTitle,
-        page: true,
-        keywords: 'phone control accessibility 手机控制 手機控制 无障碍 無障礙',
-      );
-    }
     add(
       'assistant',
       SettingsSearchDestination.assistant,
@@ -376,7 +367,7 @@ class SettingsSearchIndex {
       (l) => l.settingsPageSearch,
       page: true,
       keywords:
-          'web internet tavily exa brave bing google search 联网 聯網 搜索 搜尋 引擎',
+          'web internet tavily exa brave bing google search fetch url reader 联网 聯網 搜索 搜尋 引擎 抓取 网页 網頁 读取 讀取',
     );
     add(
       'tts',
@@ -436,6 +427,15 @@ class SettingsSearchIndex {
       page: true,
       keywords: 'memory remember 记忆 記憶 长期 長期',
     );
+    if (!kIsWeb && platform == TargetPlatform.android) {
+      add(
+        'phoneControl',
+        SettingsSearchDestination.phoneControl,
+        (l) => l.phoneControlTitle,
+        page: true,
+        keywords: 'phone control accessibility 手机控制 手機控制 无障碍 無障礙',
+      );
+    }
     add(
       'networkProxy',
       SettingsSearchDestination.networkProxy,
@@ -616,6 +616,12 @@ class SettingsSearchIndex {
       keywords: 'token usage 令牌 消耗 用量',
     );
     add(
+      'displaySettingsPageShowTotalTokensTitle',
+      SettingsSearchDestination.chatDisplay,
+      (l) => l.displaySettingsPageShowTotalTokensTitle,
+      keywords: 'token usage total API finish 累计 整轮 消耗 用量',
+    );
+    add(
       'displaySettingsPageShowThinkingCardsTitle',
       SettingsSearchDestination.chatDisplay,
       (l) => l.displaySettingsPageShowThinkingCardsTitle,
@@ -629,6 +635,11 @@ class SettingsSearchIndex {
       'displaySettingsPageShowProducedFilesTitle',
       SettingsSearchDestination.chatDisplay,
       (l) => l.displaySettingsPageShowProducedFilesTitle,
+    );
+    add(
+      'displaySettingsShowReasoningLevelBadge',
+      SettingsSearchDestination.chatDisplay,
+      (l) => l.displaySettingsShowReasoningLevelBadge,
     );
     add(
       'displaySettingsPageEnableDollarLatexTitle',

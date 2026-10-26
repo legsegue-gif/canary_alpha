@@ -1,7 +1,7 @@
 import "../../../support/business_test_harness.dart";
 import 'package:Canary/core/providers/settings_provider.dart';
 import 'package:Canary/features/settings/pages/display_settings_page.dart';
-import 'package:Canary/features/settings/widgets/memory_ui.dart';
+import 'package:Canary/shared/widgets/tip_icon.dart';
 import 'package:Canary/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -123,7 +123,7 @@ void main() {
       expect(
         find.byWidgetPredicate(
           (widget) =>
-              widget is MemoryTipIcon &&
+              widget is TipIcon &&
               widget.message ==
                   'When off, thinking-process cards are hidden in chat.',
         ),
@@ -132,7 +132,7 @@ void main() {
       expect(
         find.byWidgetPredicate(
           (widget) =>
-              widget is MemoryTipIcon &&
+              widget is TipIcon &&
               widget.message == 'When off, tool-use cards are hidden in chat.',
         ),
         findsOneWidget,
