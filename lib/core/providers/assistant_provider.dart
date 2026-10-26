@@ -117,7 +117,6 @@ class AssistantProvider extends ChangeNotifier {
     id: const Uuid().v4(),
     name: l10n.assistantProviderDefaultAssistantName,
     systemPrompt: '',
-    thinkingBudget: null,
     temperature: null,
     topP: null,
     limitContextMessages: false,
@@ -382,6 +381,18 @@ class AssistantProvider extends ChangeNotifier {
     await _persist();
     notifyListeners();
     return copy.id;
+  }
+
+  Future<void> clearModelSelectionsForProvider(String providerKey) async {
+    await loaded;
+    for (final assistant in assistants) {
+      if (assistant.chatModelProvider == providerKey) {
+        await updateAssistant(assistant.copyWith(clearChatModel: true));
+      }
+    }
+    await chatService?.clearConversationModelOverrides(
+      providerKey: providerKey,
+    );
   }
 
   Future<void> updateAssistant(Assistant updated) async {

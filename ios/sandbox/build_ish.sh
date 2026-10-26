@@ -62,7 +62,7 @@ OUTPUT_RESOURCES="$SCRIPT_DIR/resources"
 # Follow the deps/ish gitlink in OpenMinis/OpenMinis main, using our fork.
 # Update this fixed SHA when their main project adopts a new iSH revision.
 ISH_REPO="https://github.com/legsegue-gif/solos-ish.git"
-ISH_SHA="64933c9d6b8890fb9f0fe5a581e78fdad9ea5256"
+ISH_SHA="0ce58f87ef4313ccfb84a61b69bcbbe6d904f748"
 
 ARCHS="arm64"
 IOS_DEPLOYMENT_TARGET="15.0"

@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import 'package:Canary/core/database/chat_database_repository.dart';
 import 'package:Canary/core/models/assistant.dart';
+import 'package:Canary/core/models/reasoning_request.dart';
 import 'package:Canary/core/providers/assistant_provider.dart';
 import 'package:Canary/core/providers/memory_provider.dart';
 import 'package:Canary/core/providers/memory_provider_v2.dart';
@@ -23,6 +24,7 @@ import 'package:Canary/core/services/tts/tts_playback_models.dart';
 import 'package:Canary/features/assistant/pages/assistant_settings_edit_page.dart';
 import 'package:Canary/features/settings/pages/memory_settings_page.dart';
 import 'package:Canary/features/settings/widgets/memory_ui.dart';
+import 'package:Canary/shared/widgets/tip_icon.dart';
 import 'package:Canary/l10n/app_localizations.dart';
 
 import '../../../support/business_test_harness.dart';
@@ -111,7 +113,7 @@ _createProviders(WidgetTester tester) async {
           required modelId,
           required prompt,
           String? conversationId,
-          int? thinkingBudget,
+          ReasoningRequest reasoning = ReasoningRequest.auto,
         }) async => '<user_memory>false</user_memory>',
   );
   return (assistantProvider, chatService, memoryV2, pipeline);
@@ -304,7 +306,7 @@ void main() {
     expect(find.text('Summaries are only used by chat search'), findsNothing);
     expect(find.text('Use long-term memory'), findsOneWidget);
     expect(find.text('Auto-organize memory'), findsOneWidget);
-    expect(find.byType(MemoryTipIcon), findsWidgets);
+    expect(find.byType(TipIcon), findsWidgets);
   });
 
   testWidgets(
